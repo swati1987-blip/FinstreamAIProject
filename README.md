@@ -135,17 +135,17 @@ LOVABLE_API_KEY=REPLACE_WITH_YOUR_LOVABLE_API_KEY
 
 ## 🖼️ Screenshots
 
-![FinStream AI Dashboard](./Screenshots/FinstreamAI - Dashboard.png)
+![FinStream AI Dashboard](./Screenshots/finstreamai-dashboard.png)
 
-![Login Page](./Screenshots/FinstreamAI - Login page.png)
+![Login Page](./Screenshots/finstreamai-login-page.png)
 
-![Reports Page](./Screenshots/FinstreamAI - Reports page.png)
+![Reports Page](./Screenshots/finstreamai-reports-page.png)
 
-![Transactions Page](./Screenshots/FinstreamAI - Transation page.png)
+![Transactions Page](./Screenshots/finstreamai-transaction-page.png)
 
-![Project Explainer Image 1](./Project Explainer Image 1.png)
+![Project Explainer Image 1](./project-explainer-1.png)
 
-![Project Explainer Image 2](./Project Explainer Image 2.png)
+![Project Explainer Image 2](./project-explainer-2.png)
 
 ---
 

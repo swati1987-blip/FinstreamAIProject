@@ -1,0 +1,186 @@
+{
+  "name": "FinStream AI to Google Sheets Export Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "finstream-export",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "6b7202e3-654a-4f71-a6a2-53cb06f0f44b",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -592,
+        -224
+      ],
+      "webhookId": "db6f4c0a-f7ca-46c3-ac78-5b4ff85c42cb"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "body.transactions",
+        "options": {}
+      },
+      "id": "7b12594e-769b-46f8-9e96-8ab1c0677294",
+      "name": "Extract Transactions Array",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 1,
+      "position": [
+        -336,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1bHIPSsCFYGYcTG-AGqiuLIlZObOKh_Myn86o0bghvNk/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1bHIPSsCFYGYcTG-AGqiuLIlZObOKh_Myn86o0bghvNk/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Vendor": "={{ $json.vendor }}",
+            "Category": "={{ $json.category }}",
+            "Entity": "={{ $json.entity }}",
+            "Expense Category": "={{ $json.expense_category }}",
+            "Description": "={{ $json.description }}",
+            "Amount (INR)": "={{ $json.amount_inr }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Vendor",
+              "displayName": "Vendor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Category",
+              "displayName": "Category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Entity",
+              "displayName": "Entity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Expense Category",
+              "displayName": "Expense Category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Description",
+              "displayName": "Description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Amount (INR)",
+              "displayName": "Amount (INR)",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "afd5d463-80f1-4f3e-bfa3-32056e863c08",
+      "name": "Append to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -96,
+        -224
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "5v4jtNY4IjsxEo4E",
+          "name": "Gmail"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Transactions Array",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Transactions Array": {
+      "main": [
+        [
+          {
+            "node": "Append to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "27ae06ae-531d-4846-a44e-e148ec052e27",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9420e9f4e44d034606860e4a253eecc1eed8617647e6329e8337bec227c101cb"
+  },
+  "id": "aMRoEqnqeQOAZyAj",
+  "tags": []
+}

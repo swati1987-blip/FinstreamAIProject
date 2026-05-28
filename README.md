@@ -114,15 +114,15 @@ GOOGLE_GEMINI_API_KEY="your-google-gemini-api-key"
 
 ## 📸 Screenshots
 
-![Dashboard](Screenshots/finstreamai-Dashboard.png)
-![Login](Screenshots/finstreamai-login-page.png)
-![Direct cost page](Screenshots/finstreamai-DirectCost-Page-1.png)
-![Direct cost analysis](Screenshots/finstream_DirectCost-Page-2.png)
+![Login page](Screenshots/finstreamai-login-page.png)
+![Dashboard page 1](Screenshots/finstreamai-Dashboard.png)
+![Transaction ledger](Screenshots/finstreamai-TransactionLedger-Page.png)
+![Direct cost page 1](Screenshots/finstreamai-DirectCost-Page-1.png)
+![Direct cost page 2](Screenshots/finstream_DirectCost-Page-2.png)
 ![Indirect cost page](Screenshots/finstreamai-Indirectcost-Page.png)
 ![Reports page 1](Screenshots/finstreamai-Reports-Page-1.png)
 ![Reports page 2](Screenshots/finstreamai-Reports-Page-2.png)
 ![Reports page 3](Screenshots/finstreamai-Reports-Page-3.png)
-![Transaction ledger](Screenshots/finstreamai-TransactionLedger-Page.png)
 ![Figma mockup](Screenshots/finstreamai-figma-mockup.png)
 
 ## 🎥 GIF Demos

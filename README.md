@@ -12,7 +12,7 @@ Get a complete visual breakdown of FinStream AI:
 
 ![Project Overview 1](Project-explainer-1.png)
 ![Project Overview 2](Project-explainer-2.png)
-![Project Overview 3](Project-explainer-3.png)
+
 
 ## �🎯 Problem Solved
 

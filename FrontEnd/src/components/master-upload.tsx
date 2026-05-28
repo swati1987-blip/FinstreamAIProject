@@ -1,9 +1,9 @@
 import { useCallback, useRef, useState } from "react";
-import { UploadCloud, Loader2, FileText, X } from "lucide-react";
+import { UploadCloud, Loader2, FileText, X, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { cn, cleanVendorName } from "@/lib/utils";
+import { cn, cleanVendorName, resolveEntityFromVendor } from "@/lib/utils";
 
 const WEBHOOK_URL =
   "https://hook.eu1.make.com/gluqiwaidwi3telj1tjdl3byreiguxc9";
@@ -446,17 +446,26 @@ export function MasterUpload({ onAuditingChange, onSuccess }: MasterUploadProps)
             }
           }
 
+          const rawDescription = r.description ?? "";
           let entity = "None";
           const cat = r.category === "Personal" ? "Personal" : "Business";
-          if (cat === "Business" && r.entity) {
-            const entUpper = r.entity.trim().toUpperCase();
-            if (["KS", "TI", "CPM", "AAS"].includes(entUpper)) {
-              entity = entUpper;
+          const rawEntity = r.entity || (r as any).company_entity || (r as any).companyEntity || (r as any).business_id;
+          
+          if (cat === "Business") {
+            if (rawEntity) {
+              const entUpper = String(rawEntity).trim().toUpperCase();
+              if (["KS", "TI", "CPM", "AAS"].includes(entUpper)) {
+                entity = entUpper;
+              }
+            }
+            
+            // If the entity is still None, let's smart-infer it from the vendor/description/file
+            if (entity === "None") {
+              entity = resolveEntityFromVendor(String(rawVendor), `${rawDescription} ${file.name} ${text}`);
             }
           }
 
           // Map description or categorize
-          const rawDescription = r.description ?? "";
           let expCategory = "Other expenses";
           const EXPENSE_CATEGORIES_LOWER = [
             "advertisement", "admin costs", "business promotion", "courier/transportation",
@@ -784,33 +793,78 @@ export function MasterUpload({ onAuditingChange, onSuccess }: MasterUploadProps)
     >
       {/* Premium Glassmorphic Loader & Progress Bar Overlay */}
       {busy && (
-        <div className="absolute inset-0 bg-[var(--midnight-navy)]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 z-50 transition-all duration-300">
-          <div className="w-full max-w-xs space-y-4 text-center animate-fade-in">
-            <div className="relative w-14 h-14 mx-auto flex items-center justify-center">
-              <Loader2 className="w-10 h-10 animate-spin text-[var(--rose-copper)]" />
-              <div className="absolute inset-0 rounded-full border border-dashed border-[var(--rose-copper)]/30 animate-spin-reverse" style={{ animationDuration: '6s' }} />
+        <div 
+          className="absolute inset-0 bg-[#0B1124]/90 backdrop-blur-md flex flex-col items-center justify-center p-6 z-50 transition-all duration-300 border rounded-xl"
+          style={{ borderColor: 'var(--border)' }}
+        >
+          <div className="w-full max-w-xs space-y-6 text-center animate-fade-in">
+            
+            {/* Decorative Glow & Dual Spinner System */}
+            <div className="relative w-20 h-20 mx-auto flex items-center justify-center">
+              {/* Glowing Aura */}
+              <div 
+                className="absolute -inset-4 rounded-full pointer-events-none blur-xl animate-pulse"
+                style={{ background: 'radial-gradient(circle, var(--rose-copper) 0%, transparent 70%)', opacity: 0.18 }}
+              />
+              
+              {/* Outer Counter-Rotating Dashed Dotted Ring */}
+              <div 
+                className="absolute inset-[-6px] rounded-full border border-dashed animate-spin" 
+                style={{ 
+                  animationDuration: "12s", 
+                  animationDirection: "reverse",
+                  borderColor: 'var(--border)'
+                }} 
+              />
+              
+              {/* Rotating Conic Ring */}
+              <div 
+                className="absolute inset-0 rounded-full animate-spin p-[1.5px] shadow-lg"
+                style={{ 
+                  background: 'conic-gradient(from 0deg, var(--primary), var(--rose-copper), var(--primary))',
+                  boxShadow: '0 0 15px var(--primary)'
+                }}
+              >
+                {/* Inner Dark Mask */}
+                <div className="w-full h-full rounded-full bg-[#0C162F] flex items-center justify-center">
+                  <Sparkles 
+                    className="w-6 h-6 text-[var(--primary)] filter animate-pulse" 
+                    style={{ filter: 'drop-shadow(0 0 8px var(--primary))' }}
+                  />
+                </div>
+              </div>
             </div>
             
-            <div className="space-y-1">
-              <p className="text-sm font-semibold tracking-wide text-[var(--marble-white)] animate-pulse">
+            <div className="space-y-1.5">
+              <p 
+                className="text-[15px] font-semibold tracking-wide animate-pulse"
+                style={{ color: 'var(--rose-copper)', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}
+              >
                 {statusMessage}
               </p>
-              <p className="text-[10px] text-[var(--marble-white)]/60 font-mono truncate max-w-full">
+              <p className="text-[10px] text-[#8A98B0] font-mono font-medium tracking-wider uppercase truncate max-w-full">
                 Processing {fileName}
               </p>
             </div>
 
             {/* Smooth Animated Progress Bar */}
-            <div className="space-y-1.5">
-              <div className="h-1.5 w-full bg-black/40 rounded-full overflow-hidden border border-white/5">
+            <div className="space-y-2">
+              <div 
+                className="h-1.5 w-full bg-slate-950/80 rounded-full overflow-hidden border shadow-inner"
+                style={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}
+              >
                 <div 
-                  className="h-full bg-gradient-to-r from-[var(--rose-copper)] to-[#F9F3D9] transition-all duration-500 ease-out rounded-full shadow-[0_0_8px_rgba(212,175,55,0.4)]"
-                  style={{ width: `${progressPercent}%` }}
+                  className="h-full transition-all duration-500 ease-out rounded-full"
+                  style={{ 
+                    width: `${progressPercent}%`,
+                    backgroundImage: 'linear-gradient(to right, var(--crystal-teal-deep), var(--primary), var(--rose-copper))',
+                    boxShadow: '0 0 8px var(--primary)'
+                  }}
                 />
               </div>
-              <div className="flex justify-between text-[9px] text-[var(--marble-white)]/40 font-mono">
+              <div className="flex justify-between text-[9px] text-[#8A98B0]/80 font-mono tracking-widest uppercase px-0.5">
                 <span>0%</span>
-                <span>{progressPercent}%</span>
+                <span className="font-bold text-[var(--primary)]">{progressPercent}%</span>
                 <span>100%</span>
               </div>
             </div>

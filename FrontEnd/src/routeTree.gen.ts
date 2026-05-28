@@ -17,6 +17,9 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedTransactionsRouteImport } from './routes/_authenticated/transactions'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
+import { Route as AuthenticatedRawMaterialsRouteImport } from './routes/_authenticated/raw-materials'
+import { Route as AuthenticatedIndirectCostRouteImport } from './routes/_authenticated/indirect-cost'
+import { Route as AuthenticatedDirectCostRouteImport } from './routes/_authenticated/direct-cost'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 
 const SignupRoute = SignupRouteImport.update({
@@ -59,6 +62,23 @@ const AuthenticatedReportsRoute = AuthenticatedReportsRouteImport.update({
   path: '/reports',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedRawMaterialsRoute =
+  AuthenticatedRawMaterialsRouteImport.update({
+    id: '/raw-materials',
+    path: '/raw-materials',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedIndirectCostRoute =
+  AuthenticatedIndirectCostRouteImport.update({
+    id: '/indirect-cost',
+    path: '/indirect-cost',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedDirectCostRoute = AuthenticatedDirectCostRouteImport.update({
+  id: '/direct-cost',
+  path: '/direct-cost',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -71,6 +91,9 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/direct-cost': typeof AuthenticatedDirectCostRoute
+  '/indirect-cost': typeof AuthenticatedIndirectCostRoute
+  '/raw-materials': typeof AuthenticatedRawMaterialsRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/transactions': typeof AuthenticatedTransactionsRoute
@@ -81,6 +104,9 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/direct-cost': typeof AuthenticatedDirectCostRoute
+  '/indirect-cost': typeof AuthenticatedIndirectCostRoute
+  '/raw-materials': typeof AuthenticatedRawMaterialsRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/transactions': typeof AuthenticatedTransactionsRoute
@@ -93,6 +119,9 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/direct-cost': typeof AuthenticatedDirectCostRoute
+  '/_authenticated/indirect-cost': typeof AuthenticatedIndirectCostRoute
+  '/_authenticated/raw-materials': typeof AuthenticatedRawMaterialsRoute
   '/_authenticated/reports': typeof AuthenticatedReportsRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/transactions': typeof AuthenticatedTransactionsRoute
@@ -105,6 +134,9 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/dashboard'
+    | '/direct-cost'
+    | '/indirect-cost'
+    | '/raw-materials'
     | '/reports'
     | '/settings'
     | '/transactions'
@@ -115,6 +147,9 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/dashboard'
+    | '/direct-cost'
+    | '/indirect-cost'
+    | '/raw-materials'
     | '/reports'
     | '/settings'
     | '/transactions'
@@ -126,6 +161,9 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/_authenticated/dashboard'
+    | '/_authenticated/direct-cost'
+    | '/_authenticated/indirect-cost'
+    | '/_authenticated/raw-materials'
     | '/_authenticated/reports'
     | '/_authenticated/settings'
     | '/_authenticated/transactions'
@@ -197,6 +235,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedReportsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/raw-materials': {
+      id: '/_authenticated/raw-materials'
+      path: '/raw-materials'
+      fullPath: '/raw-materials'
+      preLoaderRoute: typeof AuthenticatedRawMaterialsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/indirect-cost': {
+      id: '/_authenticated/indirect-cost'
+      path: '/indirect-cost'
+      fullPath: '/indirect-cost'
+      preLoaderRoute: typeof AuthenticatedIndirectCostRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/direct-cost': {
+      id: '/_authenticated/direct-cost'
+      path: '/direct-cost'
+      fullPath: '/direct-cost'
+      preLoaderRoute: typeof AuthenticatedDirectCostRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
@@ -209,6 +268,9 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedDirectCostRoute: typeof AuthenticatedDirectCostRoute
+  AuthenticatedIndirectCostRoute: typeof AuthenticatedIndirectCostRoute
+  AuthenticatedRawMaterialsRoute: typeof AuthenticatedRawMaterialsRoute
   AuthenticatedReportsRoute: typeof AuthenticatedReportsRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedTransactionsRoute: typeof AuthenticatedTransactionsRoute
@@ -216,6 +278,9 @@ interface AuthenticatedRouteChildren {
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedDirectCostRoute: AuthenticatedDirectCostRoute,
+  AuthenticatedIndirectCostRoute: AuthenticatedIndirectCostRoute,
+  AuthenticatedRawMaterialsRoute: AuthenticatedRawMaterialsRoute,
   AuthenticatedReportsRoute: AuthenticatedReportsRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedTransactionsRoute: AuthenticatedTransactionsRoute,

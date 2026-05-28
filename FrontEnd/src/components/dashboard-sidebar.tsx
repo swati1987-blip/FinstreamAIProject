@@ -1,4 +1,4 @@
-import { LayoutDashboard, Receipt, BarChart3, Settings, LogOut } from "lucide-react";
+import { LayoutDashboard, Receipt, BarChart3, Settings, LogOut, Coins, Scale } from "lucide-react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,8 @@ import logo from "@/assets/finstream-logo.png";
 const items = [
   { label: "Dashboard", icon: LayoutDashboard, to: "/dashboard" as const },
   { label: "Transactions", icon: Receipt, to: "/transactions" as const },
+  { label: "Direct Cost", icon: Coins, to: "/direct-cost" as const },
+  { label: "Indirect Cost", icon: Scale, to: "/indirect-cost" as const },
   { label: "Reports", icon: BarChart3, to: "/reports" as const },
   { label: "Settings", icon: Settings, to: "/settings" as const },
 ];

@@ -17,6 +17,7 @@ import {
   Building2,
   Target,
   Download,
+  Scale,
 } from "lucide-react";
 import { DashboardSidebar } from "@/components/dashboard-sidebar";
 import { CurrencySwitcher } from "@/components/currency-switcher";
@@ -50,7 +51,56 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { cn, classifyExpense, parseDescriptionDetails, resolveEntityFromVendor, normalizeCategory, cleanVendorName } from "@/lib/utils";
+
+function MarkdownRenderer({ text }: { text: string }) {
+  const lines = text.split("\n");
+  return (
+    <div className="space-y-4 text-[13px] md:text-sm text-foreground/90 leading-relaxed font-sans relative z-10">
+      {lines.map((line, i) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("###")) {
+          return (
+            <h4 key={i} className="text-xs md:text-sm font-extrabold text-primary uppercase tracking-widest mt-2 mb-3 flex items-center gap-1.5 border-b border-primary/20 pb-2 w-fit">
+              {trimmed.replace(/^###\s*/, "")}
+            </h4>
+          );
+        }
+        if (trimmed.startsWith("*")) {
+          const content = trimmed.replace(/^\*\s*/, "");
+          const parts = content.split(/\*\*(.*?)\*\*/);
+          return (
+            <div key={i} className="flex items-start gap-3 pl-0.5 my-2.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary mt-2 shrink-0 shadow-[0_0_8px_rgba(212,175,55,0.7)]" />
+              <p className="flex-1 text-foreground/90 font-medium">
+                {parts.map((part, idx) => {
+                  if (idx % 2 === 1) {
+                    return <strong key={idx} className="font-extrabold text-foreground pr-0.5">{part}</strong>;
+                  }
+                  const italicParts = part.split(/\*(.*?)\*/);
+                  return italicParts.map((ip, iidx) => {
+                    if (iidx % 2 === 1) {
+                      return (
+                        <span key={iidx} className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/10 dark:bg-amber-500/20 border border-amber-500/35 text-amber-850 dark:text-amber-300 italic mx-0.5 shadow-sm leading-tight">
+                          {ip}
+                        </span>
+                      );
+                    }
+                    return ip;
+                  });
+                })}
+              </p>
+            </div>
+          );
+        }
+        if (trimmed === "") {
+          return null;
+        }
+        return <p key={i} className="text-foreground/80">{line}</p>;
+      })}
+    </div>
+  );
+}
 
 export const Route = createFileRoute("/_authenticated/reports")({
   component: ReportsPage,
@@ -85,12 +135,24 @@ const PIE_COLORS = [
 
 /** Monthly budget limits in INR — update to match actual targets */
 const DEFAULT_CATEGORY_BUDGETS: Record<string, number> = {
-  "Raw material":              5_000_000, // ₹50 L
-  "Telecommunication":            20_000, // ₹20 K
-  "Travel":                       50_000, // ₹50 K
-  "Website":                      25_000, // ₹25 K
-  "Repairs and maintenance":      50_000, // ₹50 K
-  "Other expenses":               30_000, // ₹30 K
+  "Raw Material":              5_000_000, // ₹50 L
+  "Labour & Wages":              200_000, // ₹2 L
+  "Electricity & Power":         150_000, // ₹1.5 L
+  "Water":                        30_000, // ₹30 K
+  "Repairs & Maintenance":        50_000, // ₹50 K
+  "Goods Carriage & Transport":   80_000, // ₹80 K
+  "Factory-Related Expenses":     40_000, // ₹40 K
+  
+  "Travel & Logistics":           50_000, // ₹50 K
+  "Salaries & Admin":            120_000, // ₹1.2 L
+  "Marketing & Ads":              75_000, // ₹75 K
+  "Software & Tech":              25_000, // ₹25 K
+  "General Overhead":             30_000, // ₹30 K
+  "Professional & Legal":         50_000, // ₹50 K
+  "Rent & Facilities":           100_000, // ₹1 L
+  "Taxes & Compliance":           40_000, // ₹40 K
+  "Investment & Other Assets":    50_000, // ₹50 K
+  "Other Indirect":               20_000, // ₹20 K
 };
 
 /** Compact axis tick formatter — shows ₹2.5L / ₹10K instead of full currency strings */
@@ -126,36 +188,90 @@ function ReportsPage() {
   const [selectedCompareCategories, setSelectedCompareCategories] = useState<string[]>([]);
   const [budgetInterval, setBudgetInterval] = useState<"Monthly" | "Quarterly" | "Yearly">("Monthly");
   const [showAllBudgets, setShowAllBudgets] = useState(false);
+  const [selectedCostEntities, setSelectedCostEntities] = useState<string[]>([]);
+  const [expandedDirectGroup, setExpandedDirectGroup] = useState<string | null>(null);
+  const [expandedIndirectGroup, setExpandedIndirectGroup] = useState<string | null>(null);
 
-  // Dynamic Budget Tracking States
-  const [trackedCategories, setTrackedCategories] = useState<string[]>([
-    "Raw material",
-    "Telecommunication",
-    "Travel",
-    "Website",
-    "Repairs and maintenance",
-    "Other expenses"
-  ]);
-  const [categoryBudgets, setCategoryBudgets] = useState<Record<string, number>>(() => DEFAULT_CATEGORY_BUDGETS);
+  // Universal period selection
+  const [selectedPeriod, setSelectedPeriod] = useState<string>("CY 2026");
+  const [customFromDate, setCustomFromDate] = useState<string>("");
+  const [customToDate, setCustomToDate] = useState<string>("");
+
+  // Dynamic Budget Tracking States (restored from localStorage if present)
+  const [trackedCategories, setTrackedCategories] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("finstream_tracked_categories");
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as string[];
+          const normalized = parsed.map(c => normalizeCategory(c));
+          return Array.from(new Set(normalized));
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+    return [
+      "Raw Material",
+      "Labour & Wages",
+      "Electricity & Power",
+      "Repairs & Maintenance",
+      "Software & Tech",
+      "General Overhead"
+    ];
+  });
+
+  const [categoryBudgets, setCategoryBudgets] = useState<Record<string, number>>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("finstream_category_budgets");
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as Record<string, number>;
+          const normalized: Record<string, number> = {};
+          for (const [k, v] of Object.entries(parsed)) {
+            const normKey = normalizeCategory(k);
+            normalized[normKey] = v;
+          }
+          return normalized;
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+    return DEFAULT_CATEGORY_BUDGETS;
+  });
   
   // Inline editing state for budget limits
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState<string>("");
+
+  // Synchronise budget changes back to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("finstream_tracked_categories", JSON.stringify(trackedCategories));
+    }
+  }, [trackedCategories]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("finstream_category_budgets", JSON.stringify(categoryBudgets));
+    }
+  }, [categoryBudgets]);
 
   // Unique categories found across all ledger rows in Supabase
   const allDbCategories = useMemo(() => {
     const set = new Set<string>();
     for (const r of rows) {
       if (r.expense_category) {
-        set.add(r.expense_category);
+        set.add(normalizeCategory(r.expense_category));
       }
     }
     // Include default categories as base
-    set.add("Raw material");
+    set.add("Raw Material");
     set.add("Telecommunication");
     set.add("Travel");
     set.add("Website");
-    set.add("Repairs and maintenance");
+    set.add("Repairs & Maintenance");
     set.add("Other expenses");
     return Array.from(set).sort();
   }, [rows]);
@@ -169,6 +285,7 @@ function ReportsPage() {
   const [syncStep, setSyncStep] = useState(0);
   const [syncProgress, setSyncProgress] = useState(0);
   const [syncError, setSyncError] = useState("");
+  const [autoSync, setAutoSync] = useState(() => typeof window !== "undefined" ? localStorage.getItem("finstream_n8n_auto_sync") === "true" : false);
 
   const handleSaveWebhook = (url: string) => {
     setWebhookUrl(url);
@@ -187,7 +304,19 @@ function ReportsPage() {
           .select(
             "amount,currency,category,created_at,date,expense_category,vendor,raw_text,company_entity,main_category"
           );
-        setRows((data ?? []) as Row[]);
+        
+        const enriched = (data ?? []).map((r) => {
+          let ent = r.company_entity;
+          if (!ent || ent === "None" || ent === "NONE") {
+            ent = resolveEntityFromVendor(r.vendor, r.raw_text);
+          }
+          return {
+            ...r,
+            company_entity: ent,
+          };
+        });
+
+        setRows(enriched as Row[]);
       } catch (err) {
         console.error("Error loading expenses for reports:", err);
       } finally {
@@ -199,10 +328,59 @@ function ReportsPage() {
   /** Use invoice date when available so historical bills appear in the right period */
   const effectiveDate = (r: Row) => r.date || r.created_at;
 
+  const periodFilteredRows = useMemo(() => {
+    return rows.filter((r) => {
+      const expDate = new Date(effectiveDate(r));
+      if (isNaN(expDate.getTime())) return true; // fallback
+
+      if (selectedPeriod === "FY 2026-27") {
+        // Apr 1, 2026 to Mar 31, 2027
+        const start = new Date("2026-04-01T00:00:00");
+        const end = new Date("2027-03-31T23:59:59");
+        return expDate >= start && expDate <= end;
+      }
+      if (selectedPeriod === "FY 2025-26") {
+        // Apr 1, 2025 to Mar 31, 2026
+        const start = new Date("2025-04-01T00:00:00");
+        const end = new Date("2026-03-31T23:59:59");
+        return expDate >= start && expDate <= end;
+      }
+      if (selectedPeriod === "CY 2026") {
+        // Jan 1, 2026 to Dec 31, 2026
+        const start = new Date("2026-01-01T00:00:00");
+        const end = new Date("2026-12-31T23:59:59");
+        return expDate >= start && expDate <= end;
+      }
+      if (selectedPeriod === "CY 2025") {
+        // Jan 1, 2025 to Dec 31, 2025
+        const start = new Date("2025-01-01T00:00:00");
+        const end = new Date("2025-12-31T23:59:59");
+        return expDate >= start && expDate <= end;
+      }
+      if (selectedPeriod === "custom") {
+        const start = customFromDate ? new Date(`${customFromDate}T00:00:00`) : null;
+        const end = customToDate ? new Date(`${customToDate}T23:59:59`) : null;
+        if (start && end) return expDate >= start && expDate <= end;
+        if (start) return expDate >= start;
+        if (end) return expDate <= end;
+        return true;
+      }
+      if (selectedPeriod.startsWith("month-")) {
+        const parts = selectedPeriod.replace("month-", "").split("-");
+        const yr = parseInt(parts[0], 10);
+        const mo = parseInt(parts[1], 10);
+        const start = new Date(yr, mo, 1, 0, 0, 0);
+        const end = new Date(yr, mo + 1, 0, 23, 59, 59);
+        return expDate >= start && expDate <= end;
+      }
+      return true; // All
+    });
+  }, [rows, selectedPeriod, customFromDate, customToDate]);
+
   const filteredRows = useMemo(() => {
     const now = new Date();
     const DAY = 86_400_000;
-    return rows.filter((r) => {
+    return periodFilteredRows.filter((r) => {
       const d = new Date(effectiveDate(r));
       if (isNaN(d.getTime())) return false;
       const diffDays = (now.getTime() - d.getTime()) / DAY;
@@ -213,25 +391,148 @@ function ReportsPage() {
       if (timeframe === "Year")    return diffDays <= 365;
       return true;
     });
-  }, [rows, timeframe]);
+  }, [periodFilteredRows, timeframe]);
 
   const summary = useMemo(() => {
     let total = 0, business = 0, personal = 0, investments = 0;
+    let directSpend = 0, indirectSpend = 0;
     for (const r of filteredRows) {
       const amt = convertAmount(Number(r.amount) || 0, r.currency || "INR", displayCurrency, r.created_at);
       total += amt;
-      if (r.category === "Business") business += amt;
+      if (r.category === "Business") {
+        business += amt;
+        const classified = classifyExpense({
+          category: r.category,
+          main_category: r.main_category,
+          expense_category: r.expense_category,
+          raw_text: r.raw_text,
+          vendor: r.vendor,
+        });
+        if (classified.type === "Direct") {
+          directSpend += amt;
+        } else if (classified.type === "Indirect") {
+          indirectSpend += amt;
+        }
+      }
       else if (r.category === "Investments") investments += amt;
       else personal += amt;
     }
-    return { total, business, personal, investments, count: filteredRows.length };
+    return { total, business, personal, investments, directSpend, indirectSpend, count: filteredRows.length };
   }, [filteredRows, displayCurrency]);
+
+  // ── Cost entity-filtered rows ─────────────────────────────────────────────
+  const costFilteredRows = useMemo(() => {
+    if (selectedCostEntities.length === 0) return filteredRows;
+    return filteredRows.filter(r => {
+      const ent = (r.company_entity || "None").toUpperCase();
+      return selectedCostEntities.map(e => e.toUpperCase()).includes(ent);
+    });
+  }, [filteredRows, selectedCostEntities]);
+
+  // Direct cost grouped breakdown (by category → list of entries)
+  const directBreakdown = useMemo(() => {
+    const groups: Record<string, Array<{
+      vendor: string;
+      materialType: string;
+      rateStr: string;
+      qty: string;
+      gstStr: string;
+      amount: number;
+      rawDescription: string;
+    }>> = {};
+
+    for (const r of costFilteredRows) {
+      if (r.category !== "Business") continue;
+      const classified = classifyExpense({
+        category: r.category,
+        main_category: r.main_category,
+        expense_category: r.expense_category,
+        raw_text: r.raw_text,
+        vendor: r.vendor,
+      });
+      if (classified.type !== "Direct") continue;
+      const amt = convertAmount(Number(r.amount) || 0, r.currency || "INR", displayCurrency, r.created_at);
+      
+      const parsed = parseDescriptionDetails(r.raw_text, Number(r.amount) || 0);
+      let displayGstStr = "—";
+      if (parsed.gstNum !== null) {
+        const convertedGst = convertAmount(parsed.gstNum, r.currency || "INR", displayCurrency, r.created_at);
+        displayGstStr = formatCurrency(convertedGst, displayCurrency);
+      }
+
+      const groupKey = normalizeCategory(r.expense_category || classified.category);
+      if (!groups[groupKey]) groups[groupKey] = [];
+      groups[groupKey].push({
+        vendor: r.vendor || "Unknown",
+        materialType: parsed.materialType || groupKey,
+        rateStr: parsed.rateStr,
+        qty: parsed.qtyStr,
+        gstStr: displayGstStr,
+        amount: amt,
+        rawDescription: r.raw_text || "",
+      });
+    }
+    return Object.entries(groups).map(([cat, entries]) => ({
+      category: cat,
+      total: entries.reduce((s, e) => s + e.amount, 0),
+      entries,
+    })).sort((a, b) => b.total - a.total);
+  }, [costFilteredRows, displayCurrency]);
+
+  // Indirect cost grouped breakdown
+  const indirectBreakdown = useMemo(() => {
+    const groups: Record<string, Array<{ vendor: string; description: string; amount: number }>> = {};
+    for (const r of costFilteredRows) {
+      if (r.category !== "Business") continue;
+      const classified = classifyExpense({
+        category: r.category,
+        main_category: r.main_category,
+        expense_category: r.expense_category,
+        raw_text: r.raw_text,
+        vendor: r.vendor,
+      });
+      if (classified.type !== "Indirect") continue;
+      const amt = convertAmount(Number(r.amount) || 0, r.currency || "INR", displayCurrency, r.created_at);
+      const groupKey = normalizeCategory(r.expense_category || classified.category);
+      if (!groups[groupKey]) groups[groupKey] = [];
+      groups[groupKey].push({
+        vendor: r.vendor || "Unknown",
+        description: r.raw_text || "",
+        amount: amt,
+      });
+    }
+    return Object.entries(groups).map(([cat, entries]) => ({
+      category: cat,
+      total: entries.reduce((s, e) => s + e.amount, 0),
+      entries,
+    })).sort((a, b) => b.total - a.total);
+  }, [costFilteredRows, displayCurrency]);
+
+  // Entity-filtered summary for cost ratio (used in the ratio bar & benchmark)
+  const costSummary = useMemo(() => {
+    let business = 0, directSpend = 0, indirectSpend = 0;
+    for (const r of costFilteredRows) {
+      if (r.category !== "Business") continue;
+      const amt = convertAmount(Number(r.amount) || 0, r.currency || "INR", displayCurrency, r.created_at);
+      business += amt;
+      const classified = classifyExpense({
+        category: r.category,
+        main_category: r.main_category,
+        expense_category: r.expense_category,
+        raw_text: r.raw_text,
+        vendor: r.vendor,
+      });
+      if (classified.type === "Direct") directSpend += amt;
+      else if (classified.type === "Indirect") indirectSpend += amt;
+    }
+    return { business, directSpend, indirectSpend };
+  }, [costFilteredRows, displayCurrency]);
 
   // ── Distribution datasets ───────────────────────────────────────────────
   const categoryData = useMemo(() => {
     const map: Record<string, number> = {};
     for (const r of filteredRows) {
-      const cat = r.expense_category || "Other expenses";
+      const cat = normalizeCategory(r.expense_category || "Other expenses");
       map[cat] = (map[cat] || 0) + convertAmount(Number(r.amount) || 0, r.currency || "INR", displayCurrency, r.created_at);
     }
     return Object.entries(map)
@@ -333,7 +634,7 @@ function ReportsPage() {
     });
 
     for (const r of budgetRows) {
-      const cat = r.expense_category || "Other expenses";
+      const cat = normalizeCategory(r.expense_category);
       spentMap[cat] = (spentMap[cat] || 0) +
         convertAmount(Number(r.amount) || 0, r.currency || "INR", "INR", r.created_at);
     }
@@ -369,8 +670,8 @@ function ReportsPage() {
       const amt = convertAmount(Number(r.amount) || 0, r.currency || "INR", "INR", r.created_at);
       if (amt > largestAmt) { largestAmt = amt; largestTx = r; }
       vendorCount[r.vendor || "Unknown"] = (vendorCount[r.vendor || "Unknown"] || 0) + 1;
-      catINR[r.expense_category || "Other expenses"] =
-        (catINR[r.expense_category || "Other expenses"] || 0) + amt;
+      const cat = normalizeCategory(r.expense_category || "Other expenses");
+      catINR[cat] = (catINR[cat] || 0) + amt;
     }
 
     // Prior same-length window for MoM comparison
@@ -388,7 +689,7 @@ function ReportsPage() {
       const d = new Date(effectiveDate(r));
       const diff = now.getTime() - d.getTime();
       if (diff > windowMs && diff <= windowMs * 2) {
-        const cat = r.expense_category || "Other expenses";
+        const cat = normalizeCategory(r.expense_category || "Other expenses");
         priorCatINR[cat] = (priorCatINR[cat] || 0) +
           convertAmount(Number(r.amount) || 0, r.currency || "INR", "INR", r.created_at);
       }
@@ -414,56 +715,129 @@ function ReportsPage() {
     if (filteredRows.length === 0) return "";
 
     const catINR: Record<string, number> = {};
+    const vendorCounts: Record<string, number> = {};
     const vendorINR: Record<string, number> = {};
+    let fixedTotal = 0;
+    let variableTotal = 0;
+    const fixedBreakdown: Record<string, number> = {};
+
+    const fixedCategories = new Set([
+      "Salaries & Admin",
+      "Labour & Wages",
+      "Rent & Facilities",
+      "Electricity & Power"
+    ]);
+
     for (const r of filteredRows) {
       const amt = convertAmount(Number(r.amount) || 0, r.currency || "INR", "INR", r.created_at);
-      catINR[r.expense_category || "Other expenses"] = (catINR[r.expense_category || "Other expenses"] || 0) + amt;
-      vendorINR[r.vendor || "Unknown"] = (vendorINR[r.vendor || "Unknown"] || 0) + amt;
+      const cat = normalizeCategory(r.expense_category || "Other expenses");
+      catINR[cat] = (catINR[cat] || 0) + amt;
+
+      const rawVendor = r.vendor || "Unknown";
+      const cleanVendor = cleanVendorName(rawVendor);
+      const vendorKey = cleanVendor && cleanVendor !== "—" && cleanVendor !== "Unknown" ? cleanVendor : "Unknown";
+      if (vendorKey !== "Unknown") {
+        vendorCounts[vendorKey] = (vendorCounts[vendorKey] || 0) + 1;
+        vendorINR[vendorKey] = (vendorINR[vendorKey] || 0) + amt;
+      }
+
+      if (fixedCategories.has(cat)) {
+        fixedTotal += amt;
+        fixedBreakdown[cat] = (fixedBreakdown[cat] || 0) + amt;
+      } else {
+        variableTotal += amt;
+      }
     }
 
-    const totalINR = Object.values(catINR).reduce((a, b) => a + b, 0);
+    const totalINR = fixedTotal + variableTotal;
     const sortedCats = Object.entries(catINR).sort((a, b) => b[1] - a[1]);
-    const sortedVendors = Object.entries(vendorINR).sort((a, b) => b[1] - a[1]);
-    const { largestTx, largestAmt, fastestCat, fastestGrowth, frequentVendors } = anomalyData;
+    const { frequentVendors } = anomalyData;
 
-    let text = `Over the selected ${timeframe.toLowerCase()} period, `;
-
+    // 1. Top Expense Core
+    let topExpenseCoreText = "";
     if (sortedCats.length > 0) {
       const [topCat, topAmt] = sortedCats[0];
       const pct = totalINR > 0 ? ((topAmt / totalINR) * 100).toFixed(0) : "0";
-      text += `${topCat} is the largest head at ${formatCurrency(topAmt, "INR")} (${pct}% of total outflow)`;
-      if (sortedCats.length > 1)
-        text += `, followed by ${sortedCats[1][0]} at ${formatCurrency(sortedCats[1][1], "INR")}`;
-      text += ". ";
+      
+      let sectorDesc = "operational overhead";
+      if (topCat === "Salaries & Admin" || topCat === "Labour & Wages") {
+        sectorDesc = "payroll and administration";
+      } else if (topCat === "Raw Material") {
+        sectorDesc = "production inventory";
+      } else if (topCat === "Marketing & Ads") {
+        sectorDesc = "growth and marketing acquisition";
+      } else if (topCat === "Software & Tech" || topCat === "Rent & Facilities") {
+        sectorDesc = "operational infrastructure";
+      }
+      
+      topExpenseCoreText = `${topCat} is the primary spending sector (${sectorDesc}) at ${formatCurrency(topAmt, "INR")} (${pct}% of total outflows).`;
+      if (sortedCats.length > 1) {
+        const [nextCat, nextAmt] = sortedCats[1];
+        topExpenseCoreText += ` Secondary outflows were led by ${nextCat} at ${formatCurrency(nextAmt, "INR")}.`;
+      }
+    } else {
+      topExpenseCoreText = "No categories logged this period.";
     }
 
-    if (sortedVendors.length > 0) {
-      text += `Top vendors: ${sortedVendors[0][0]} (${formatCurrency(sortedVendors[0][1], "INR")})`;
-      if (sortedVendors[1]) text += ` and ${sortedVendors[1][0]} (${formatCurrency(sortedVendors[1][1], "INR")})`;
-      text += ". ";
+    // 2. Fixed vs. Variable Overhead Velocity
+    let fixedVariableVelocityText = "";
+    if (totalINR > 0) {
+      const fixedPct = ((fixedTotal / totalINR) * 100).toFixed(0);
+      const variablePct = ((variableTotal / totalINR) * 100).toFixed(0);
+      
+      fixedVariableVelocityText = `Fixed operational baseline expenditures (Payroll, Rent, Power) stand at **${formatCurrency(fixedTotal, "INR")}** (${fixedPct}%), while fluid variable expenses constitute **${formatCurrency(variableTotal, "INR")}** (${variablePct}%).`;
+      
+      const fixedParts = Object.entries(fixedBreakdown)
+        .sort((a, b) => b[1] - a[1])
+        .map(([cat, amt]) => `${cat}: ${formatCurrency(amt, "INR")}`);
+      
+      if (fixedParts.length > 0) {
+        fixedVariableVelocityText += ` Fixed cost breakdown: ${fixedParts.join(", ")}. This reflects a true operational run-rate baseline of **${formatCurrency(fixedTotal, "INR")}** required to keep the core operations active.`;
+      } else {
+        fixedVariableVelocityText += ` This indicates a highly dynamic overhead profile with minimal baseline fixed commitments this period.`;
+      }
+    } else {
+      fixedVariableVelocityText = "No overhead expenditures detected to evaluate velocity.";
     }
 
-    if (fastestCat) {
-      if (fastestGrowth >= 999)
-        text += `${fastestCat} is a new spending category this period. `;
-      else if (fastestGrowth > 0)
-        text += `${fastestCat} spend is up ${fastestGrowth.toFixed(0)}% vs the prior ${timeframe.toLowerCase()}. `;
+    // 3. Transaction Density & Vendor Frequency
+    let transactionDensityText = "";
+    const sortedVendorsByCount = Object.entries(vendorCounts)
+      .filter(([, count]) => count >= 2)
+      .sort((a, b) => b[1] - a[1]);
+
+    if (sortedVendorsByCount.length > 0) {
+      const vendorParts = sortedVendorsByCount.slice(0, 3).map(([vend, count]) => {
+        const amt = vendorINR[vend] || 0;
+        return `**${vend}** (${count}x, totaling ${formatCurrency(amt, "INR")})`;
+      });
+      transactionDensityText = `High-frequency vendor endpoints include ${vendorParts.join(", ")}. Multiple recurring micro-transactions or repetitive invoicing indicate a high transaction density, which introduces operational cash flow friction and highlights active supply-chain/logistics spending habits.`;
+    } else {
+      transactionDensityText = "No high-frequency or repetitive vendor endpoints detected this period. Daily cash flow friction remains low, representing a highly diversified set of transaction endpoints.";
     }
 
+    // 4. Anomaly & Duplicate Alert
+    let anomalyText = "";
     if (frequentVendors.length > 0) {
-      const vlist = frequentVendors.slice(0, 2).map(([v, c]) => `${v} (×${c})`).join(", ");
-      text += `${vlist} appear${frequentVendors.length === 1 ? "s" : ""} multiple times — verify for potential duplicates. `;
+      const list = frequentVendors.slice(0, 2).map(([vend, count]) => {
+        return `*Action Required: Review ${count} matching transactions for ${cleanVendorName(vend)} for potential duplicate entries.*`;
+      });
+      anomalyText = list.join(" ");
+    } else {
+      anomalyText = "No potential double-billing or multiple-transaction vendor spikes detected this period.";
     }
 
-    if (largestTx) {
-      const txDate = (() => {
-        try { return format(new Date(effectiveDate(largestTx!)), "dd-MMM-yy"); }
-        catch { return "—"; }
-      })();
-      text += `Largest single transaction: ${formatCurrency(largestAmt, "INR")} — ${largestTx.vendor || "Unknown"} on ${txDate}.`;
-    }
+    const titleLabel = timeframe === "Month" || timeframe === "Day" || timeframe === "Week"
+      ? "Monthly Spend Insights"
+      : timeframe === "Quarter"
+        ? "Quarterly Spend Insights"
+        : "Yearly Spend Insights";
 
-    return text;
+    return `### 📊 ${titleLabel}
+* **Top Expense Core:** ${topExpenseCoreText}
+* **Fixed vs. Variable Overhead Velocity:** ${fixedVariableVelocityText}
+* **Transaction Density & Vendor Frequency:** ${transactionDensityText}
+* **Anomaly & Duplicate Alert:** ${anomalyText}`;
   }, [filteredRows, timeframe, anomalyData]);
 
   // ── Drilldown ──────────────────────────────────────────────────────────
@@ -474,7 +848,7 @@ function ReportsPage() {
 
   const drilldownStats = useMemo(() => {
     const target = selectedDrilldown || categoryData[0]?.name || "Other expenses";
-    const matched = filteredRows.filter((r) => (r.expense_category || "Other expenses") === target);
+    const matched = filteredRows.filter((r) => normalizeCategory(r.expense_category || "Other expenses") === target);
     let total = 0;
     for (const r of matched)
       total += convertAmount(Number(r.amount) || 0, r.currency || "INR", displayCurrency, r.created_at);
@@ -490,7 +864,7 @@ function ReportsPage() {
   // ── Period comparison ──────────────────────────────────────────────────
   const allCategories = useMemo(() => {
     const set = new Set<string>();
-    for (const r of rows) set.add(r.expense_category || "Other expenses");
+    for (const r of rows) set.add(normalizeCategory(r.expense_category || "Other expenses"));
     return Array.from(set).sort();
   }, [rows]);
 
@@ -508,7 +882,7 @@ function ReportsPage() {
         const d = new Date(effectiveDate(r));
         if (isNaN(d.getTime())) continue;
         const yr = d.getFullYear().toString();
-        const cat = r.expense_category || "Other expenses";
+        const cat = normalizeCategory(r.expense_category || "Other expenses");
         if (!categories.includes(cat)) continue;
         const amt = convertAmount(Number(r.amount) || 0, r.currency || "INR", displayCurrency, r.created_at);
         if (!map[yr]) map[yr] = {};
@@ -523,7 +897,7 @@ function ReportsPage() {
         const d = new Date(effectiveDate(r));
         if (isNaN(d.getTime())) continue;
         const qtr = `Q${Math.floor(d.getMonth() / 3) + 1} ${d.getFullYear()}`;
-        const cat = r.expense_category || "Other expenses";
+        const cat = normalizeCategory(r.expense_category || "Other expenses");
         if (!categories.includes(cat)) continue;
         const amt = convertAmount(Number(r.amount) || 0, r.currency || "INR", displayCurrency, r.created_at);
         if (!map[qtr]) map[qtr] = {};
@@ -568,7 +942,7 @@ function ReportsPage() {
       (r.vendor || "").replace(/,/g, ";"),
       r.main_category || r.category || "",
       r.company_entity || "",
-      r.expense_category || "",
+      r.expense_category ? normalizeCategory(r.expense_category) : "",
       (r.raw_text || "").replace(/,/g, ";"),
       convertAmount(Number(r.amount) || 0, r.currency || "INR", "INR", r.created_at).toFixed(2),
       r.currency,
@@ -591,7 +965,7 @@ function ReportsPage() {
       r.vendor || "Unknown",
       r.main_category || r.category || "Business",
       r.company_entity || "None",
-      r.expense_category || "Other expenses",
+      normalizeCategory(r.expense_category || "Other expenses"),
       (r.raw_text || "").replace(/\t/g, " "),
       convertAmount(Number(r.amount) || 0, r.currency || "INR", "INR", r.created_at).toFixed(2),
       r.currency,
@@ -648,7 +1022,7 @@ function ReportsPage() {
         vendor: r.vendor || "Unknown",
         category: r.main_category || r.category || "Business",
         entity: r.company_entity || "None",
-        expense_category: r.expense_category || "Other expenses",
+        expense_category: normalizeCategory(r.expense_category || "Other expenses"),
         description: r.raw_text || "",
         amount_inr: convertAmount(Number(r.amount) || 0, r.currency || "INR", "INR", r.created_at),
         currency: r.currency,
@@ -789,38 +1163,105 @@ function ReportsPage() {
 
         <div className="p-6 md:p-10 space-y-8 max-w-6xl mx-auto">
           {/* ── Timeframe selector ────────────────────────────────── */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-card/30 p-5 rounded-xl border border-border">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-card/30 p-5 rounded-xl border border-border">
             <div>
               <h2 className="text-base font-semibold flex items-center gap-2 text-foreground">
-                <Calendar className="w-4 h-4 text-primary" /> Select Analysis Interval
+                <Calendar className="w-4 h-4 text-primary animate-pulse" /> Select Analysis Interval
               </h2>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground mt-0.5">
                 Tracking {summary.count} transactions in the selected period
               </p>
             </div>
-            <div className="flex flex-wrap bg-muted p-1 rounded-lg border border-border self-start md:self-center gap-1">
-              {(["Day", "Week", "Month", "Quarter", "Year"] as const).map((tf) => {
-                const label = 
-                  tf === "Day" ? "Day-wise" :
-                  tf === "Week" ? "Week-wise" :
-                  tf === "Month" ? "Month-wise" :
-                  tf === "Quarter" ? "Quarter-wise" :
-                  "Year-wise";
-                return (
-                  <button
-                    key={tf}
-                    onClick={() => setTimeframe(tf)}
-                    className={cn(
-                      "px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap",
-                      timeframe === tf
-                        ? "bg-primary text-primary-foreground shadow-[0_4px_12px_-3px_rgba(212,175,55,0.4)] font-bold"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
+            
+            <div className="flex flex-wrap items-center gap-3 self-start lg:self-center">
+              {/* Period Dropdown Selection */}
+              <div className="flex items-center border border-border/80 rounded-md px-2.5 bg-card h-8">
+                <Calendar className="w-3.5 h-3.5 text-muted-foreground mr-2 shrink-0" />
+                <select
+                  value={selectedPeriod}
+                  onChange={(e) => setSelectedPeriod(e.target.value)}
+                  className="text-xs bg-transparent text-foreground border-none outline-none pr-4 font-semibold cursor-pointer focus:ring-0 focus:outline-none"
+                >
+                  <option value="CY 2026">Calendar Year 2026</option>
+                  <option value="CY 2025">Calendar Year 2025</option>
+                  <option value="FY 2026-27">Financial Year 2026-27</option>
+                  <option value="FY 2025-26">Financial Year 2025-26</option>
+                  <optgroup label="Months (2026)">
+                    <option value="month-2026-0">January 2026</option>
+                    <option value="month-2026-1">February 2026</option>
+                    <option value="month-2026-2">March 2026</option>
+                    <option value="month-2026-3">April 2026</option>
+                    <option value="month-2026-4">May 2026</option>
+                    <option value="month-2026-5">June 2026</option>
+                    <option value="month-2026-6">July 2026</option>
+                    <option value="month-2026-7">August 2026</option>
+                    <option value="month-2026-8">September 2026</option>
+                    <option value="month-2026-9">October 2026</option>
+                    <option value="month-2026-10">November 2026</option>
+                    <option value="month-2026-11">December 2026</option>
+                  </optgroup>
+                  <optgroup label="Months (2025)">
+                    <option value="month-2025-0">January 2025</option>
+                    <option value="month-2025-1">February 2025</option>
+                    <option value="month-2025-2">March 2025</option>
+                    <option value="month-2025-3">April 2025</option>
+                    <option value="month-2025-4">May 2025</option>
+                    <option value="month-2025-5">June 2025</option>
+                    <option value="month-2025-6">July 2025</option>
+                    <option value="month-2025-7">August 2025</option>
+                    <option value="month-2025-8">September 2025</option>
+                    <option value="month-2025-9">October 2025</option>
+                    <option value="month-2025-10">November 2025</option>
+                    <option value="month-2025-11">December 2025</option>
+                  </optgroup>
+                  <option value="custom">Custom Date Range...</option>
+                  <option value="All">All Periods</option>
+                </select>
+              </div>
+
+              {/* Custom Date Range Picker */}
+              {selectedPeriod === "custom" && (
+                <div className="flex items-center gap-1.5 animate-in fade-in duration-200">
+                  <input
+                    type="date"
+                    value={customFromDate}
+                    onChange={(e) => setCustomFromDate(e.target.value)}
+                    className="text-xs h-8 px-2 border border-border/80 rounded-md bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <span className="text-[10px] text-muted-foreground font-medium">to</span>
+                  <input
+                    type="date"
+                    value={customToDate}
+                    onChange={(e) => setCustomToDate(e.target.value)}
+                    className="text-xs h-8 px-2 border border-border/80 rounded-md bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              )}
+
+              <div className="flex bg-muted p-1 rounded-lg border border-border gap-1">
+                {(["Day", "Week", "Month", "Quarter", "Year"] as const).map((tf) => {
+                  const label = 
+                    tf === "Day" ? "Day-wise" :
+                    tf === "Week" ? "Week-wise" :
+                    tf === "Month" ? "Month-wise" :
+                    tf === "Quarter" ? "Quarter-wise" :
+                    "Year-wise";
+                  return (
+                    <button
+                      key={tf}
+                      onClick={() => setTimeframe(tf)}
+                      className={cn(
+                        "px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap",
+                        timeframe === tf
+                          ? "bg-primary text-primary-foreground shadow-[0_4px_12px_-3px_rgba(212,175,55,0.4)] font-bold"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -855,7 +1296,7 @@ function ReportsPage() {
                         ✦ AI Generated · {timeframe}
                       </span>
                     </div>
-                    <p className="text-sm leading-relaxed text-foreground/90 italic">{aiNarrative}</p>
+                    <MarkdownRenderer text={aiNarrative} />
                   </div>
                 </div>
               )}
@@ -868,6 +1309,279 @@ function ReportsPage() {
                 <StatCard label="Investments"     value={summary.investments} currency={displayCurrency}        icon={<DollarSign   className="w-4.5 h-4.5 text-emerald-500" />} />
               </div>
 
+              {/* Direct vs Indirect Ratio Card — Full Detail */}
+              <div className="card-luxury rounded-2xl border border-border bg-card p-6 space-y-5">
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <Scale className="w-5 h-5 text-[var(--primary)]" />
+                    <h3 className="text-sm font-bold tracking-tight text-foreground uppercase">
+                      Direct vs Indirect Cost Ratio
+                    </h3>
+                  </div>
+                  {/* Entity filter pills */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mr-1">Entities:</span>
+                    
+                    {/* All Pill */}
+                    <button
+                      onClick={() => { 
+                        setSelectedCostEntities([]); 
+                        setExpandedDirectGroup(null); 
+                        setExpandedIndirectGroup(null); 
+                      }}
+                      className={cn(
+                        "px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all border",
+                        selectedCostEntities.length === 0
+                          ? "bg-primary text-primary-foreground border-primary shadow-[0_2px_8px_rgba(212,175,55,0.3)]"
+                          : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                      )}
+                    >
+                      All
+                    </button>
+
+                    {/* KS, TI, CPM, AAS Pills */}
+                    {["KS", "TI", "CPM", "AAS"].map((ent) => {
+                      const isSelected = selectedCostEntities.includes(ent);
+                      return (
+                        <button
+                          key={ent}
+                          onClick={() => { 
+                            setSelectedCostEntities(prev => {
+                              const next = prev.includes(ent) 
+                                ? prev.filter(e => e !== ent) 
+                                : [...prev, ent];
+                              return next;
+                            });
+                            setExpandedDirectGroup(null); 
+                            setExpandedIndirectGroup(null); 
+                          }}
+                          className={cn(
+                            "px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all border",
+                            isSelected
+                              ? "bg-primary text-primary-foreground border-primary shadow-[0_2px_8px_rgba(212,175,55,0.3)]"
+                              : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                          )}
+                        >
+                          {ent}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Top row: totals + benchmark */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Direct Total */}
+                  <div className="p-4 rounded-xl border border-[rgba(212,175,55,0.2)] bg-[rgba(212,175,55,0.02)] flex flex-col justify-between">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground">Direct Production Cost</span>
+                    <div className="text-2xl font-black text-foreground mt-1">
+                      {formatCurrency(costSummary.directSpend, displayCurrency)}
+                    </div>
+                    <div className="text-xs font-semibold text-[var(--primary)] mt-1">
+                      {costSummary.business > 0 ? ((costSummary.directSpend / costSummary.business) * 100).toFixed(1) : "0.0"}% of business spend
+                    </div>
+                  </div>
+
+                  {/* Indirect Total */}
+                  <div className={`p-4 rounded-xl border flex flex-col justify-between ${
+                    (costSummary.business > 0 && (costSummary.indirectSpend / costSummary.business) * 100 > 40.0)
+                      ? "border-red-500/30 bg-red-500/[0.015]"
+                      : "border-border bg-card"
+                  }`}>
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground">Indirect Cost (Overhead)</span>
+                    <div className="text-2xl font-black text-foreground mt-1">
+                      {formatCurrency(costSummary.indirectSpend, displayCurrency)}
+                    </div>
+                    <div className={`text-xs font-semibold mt-1 ${
+                      (costSummary.business > 0 && (costSummary.indirectSpend / costSummary.business) * 100 > 40.0)
+                        ? "text-red-400" : "text-muted-foreground"
+                    }`}>
+                      {costSummary.business > 0 ? ((costSummary.indirectSpend / costSummary.business) * 100).toFixed(1) : "0.0"}% of business spend
+                    </div>
+                  </div>
+
+                  {/* Benchmark */}
+                  <div className="flex flex-col justify-center">
+                    {(() => {
+                      const directRatio = costSummary.business > 0 ? (costSummary.directSpend / costSummary.business) * 100 : 0;
+                      const indirectRatio = costSummary.business > 0 ? (costSummary.indirectSpend / costSummary.business) * 100 : 0;
+                      if (costSummary.business === 0) return <div className="text-xs text-muted-foreground">No business transactions{selectedCostEntities.length > 0 ? ` for entity ${selectedCostEntities.join(", ")}` : ""} in this period.</div>;
+                      const isHealthy = directRatio >= 60.0 && directRatio <= 70.0;
+                      const isIndirectHigh = indirectRatio > 40.0;
+                      return (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`h-2.5 w-2.5 rounded-full ${isHealthy ? "bg-emerald-500 animate-pulse" : isIndirectHigh ? "bg-red-500 animate-pulse" : "bg-amber-500 animate-pulse"}`} />
+                            <span className="text-xs font-bold uppercase tracking-wider text-foreground">
+                              {isHealthy ? "Optimal Ratio" : isIndirectHigh ? "🚨 High Overheads Flagged" : "Sub-Optimal Ratio"}
+                            </span>
+                          </div>
+                          <p className="text-[11px] leading-relaxed text-muted-foreground">
+                            {isHealthy
+                              ? "Excellent! Your Direct Costs are aligned with the 60-70% manufacturing benchmark."
+                              : isIndirectHigh
+                              ? "Warning: Indirect overhead costs exceed 40% of business spend."
+                              : `Direct Production Outflow stands at ${directRatio.toFixed(0)}%. Target: 60-70%.`}
+                          </p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Ratio bar */}
+                {costSummary.business > 0 && (
+                  <div className="space-y-1.5 pt-1 border-t border-[rgba(212,175,55,0.08)]">
+                    <div className="flex justify-between text-[10px] font-bold text-muted-foreground uppercase">
+                      <span>Direct: {((costSummary.directSpend / costSummary.business) * 100).toFixed(0)}%</span>
+                      <span>Indirect: {((costSummary.indirectSpend / costSummary.business) * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-muted overflow-hidden flex">
+                      <div className="h-full bg-gradient-to-r from-[rgba(212,175,55,0.7)] to-[var(--primary)]" style={{ width: `${(costSummary.directSpend / costSummary.business) * 100}%` }} />
+                      <div className="h-full bg-muted-foreground/30" style={{ width: `${(costSummary.indirectSpend / costSummary.business) * 100}%` }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* ── DIRECT COST BREAKDOWN ── */}
+                {directBreakdown.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-[rgba(212,175,55,0.08)]">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="w-2 h-2 rounded-full bg-[var(--primary)]" />
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--primary)]">Direct Cost Breakdown</span>
+                    </div>
+                    {directBreakdown.map((group) => (
+                      <div key={group.category} className="rounded-lg border border-[rgba(212,175,55,0.12)] overflow-hidden">
+                        {/* Group header — clickable to expand */}
+                        <button
+                          onClick={() => setExpandedDirectGroup(expandedDirectGroup === group.category ? null : group.category)}
+                          className="w-full flex items-center justify-between px-3 py-2.5 bg-[rgba(212,175,55,0.04)] hover:bg-[rgba(212,175,55,0.08)] transition-colors text-left"
+                        >
+                          <span className="text-xs font-bold text-foreground">{group.category}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs font-black text-[var(--primary)] tabular-nums">{formatCurrency(group.total, displayCurrency)}</span>
+                            <span className="text-[10px] text-muted-foreground">{group.entries.length} {group.entries.length === 1 ? "entry" : "entries"}</span>
+                            <span className="text-muted-foreground text-xs">{expandedDirectGroup === group.category ? "▲" : "▼"}</span>
+                          </div>
+                        </button>
+
+                        {/* Expanded rows */}
+                        {expandedDirectGroup === group.category && (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="bg-muted/30 text-[10px] uppercase tracking-wider text-muted-foreground">
+                                  <th className="px-3 py-2 text-left font-bold">Vendor</th>
+                                  <th className="px-3 py-2 text-left font-bold">Material / Description</th>
+                                  <th className="px-3 py-2 text-right font-bold">Rate</th>
+                                  <th className="px-3 py-2 text-right font-bold">Qty</th>
+                                  <th className="px-3 py-2 text-right font-bold">GST</th>
+                                  <th className="px-3 py-2 text-right font-bold">Amount</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {group.entries.map((entry, idx) => (
+                                  <tr key={idx} className="border-t border-border/50 hover:bg-muted/20 transition-colors">
+                                    <td className="px-3 py-2.5 font-semibold text-foreground max-w-[160px]">
+                                      <span className="truncate block" title={entry.vendor}>{entry.vendor}</span>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-muted-foreground max-w-[200px]">
+                                      <span className="truncate block" title={entry.materialType}>{entry.materialType || "—"}</span>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-mono text-foreground/80 whitespace-nowrap">{entry.rateStr}</td>
+                                    <td className="px-3 py-2.5 text-right font-mono text-foreground/80 whitespace-nowrap">{entry.qty}</td>
+                                    <td className="px-3 py-2.5 text-right font-mono text-foreground/80 whitespace-nowrap">{entry.gstStr}</td>
+                                    <td className="px-3 py-2.5 text-right font-bold text-foreground tabular-nums whitespace-nowrap">
+                                      {formatCurrency(entry.amount, displayCurrency)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                              <tfoot>
+                                <tr className="border-t border-[rgba(212,175,55,0.2)] bg-[rgba(212,175,55,0.04)]">
+                                  <td colSpan={5} className="px-3 py-2 text-xs font-bold text-[var(--primary)] uppercase tracking-wide">Subtotal</td>
+                                  <td className="px-3 py-2 text-right font-black text-[var(--primary)] tabular-nums whitespace-nowrap">
+                                    {formatCurrency(group.total, displayCurrency)}
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* ── INDIRECT COST BREAKDOWN ── */}
+                {indirectBreakdown.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-border/40">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="w-2 h-2 rounded-full bg-muted-foreground/50" />
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Indirect Cost Breakdown</span>
+                    </div>
+                    {indirectBreakdown.map((group) => (
+                      <div key={group.category} className="rounded-lg border border-border overflow-hidden">
+                        <button
+                          onClick={() => setExpandedIndirectGroup(expandedIndirectGroup === group.category ? null : group.category)}
+                          className="w-full flex items-center justify-between px-3 py-2.5 bg-muted/20 hover:bg-muted/40 transition-colors text-left"
+                        >
+                          <span className="text-xs font-bold text-foreground">{group.category}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs font-black text-foreground tabular-nums">{formatCurrency(group.total, displayCurrency)}</span>
+                            <span className="text-[10px] text-muted-foreground">{group.entries.length} {group.entries.length === 1 ? "entry" : "entries"}</span>
+                            <span className="text-muted-foreground text-xs">{expandedIndirectGroup === group.category ? "▲" : "▼"}</span>
+                          </div>
+                        </button>
+                        {expandedIndirectGroup === group.category && (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="bg-muted/30 text-[10px] uppercase tracking-wider text-muted-foreground">
+                                  <th className="px-3 py-2 text-left font-bold">Vendor</th>
+                                  <th className="px-3 py-2 text-left font-bold">Description</th>
+                                  <th className="px-3 py-2 text-right font-bold">Amount</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {group.entries.map((entry, idx) => (
+                                  <tr key={idx} className="border-t border-border/50 hover:bg-muted/20 transition-colors">
+                                    <td className="px-3 py-2.5 font-semibold text-foreground max-w-[180px]">
+                                      <span className="truncate block" title={entry.vendor}>{entry.vendor}</span>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-muted-foreground max-w-[250px]">
+                                      <span className="truncate block" title={entry.description}>{entry.description || "—"}</span>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-bold text-foreground tabular-nums whitespace-nowrap">
+                                      {formatCurrency(entry.amount, displayCurrency)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                              <tfoot>
+                                <tr className="border-t border-border bg-muted/20">
+                                  <td colSpan={2} className="px-3 py-2 text-xs font-bold text-muted-foreground uppercase tracking-wide">Subtotal</td>
+                                  <td className="px-3 py-2 text-right font-black text-foreground tabular-nums whitespace-nowrap">
+                                    {formatCurrency(group.total, displayCurrency)}
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Empty state */}
+                {directBreakdown.length === 0 && indirectBreakdown.length === 0 && costSummary.business === 0 && (
+                  <div className="text-center py-6 text-muted-foreground text-sm">
+                    No business transactions found{selectedCostEntities.length > 0 ? ` for entity: ${selectedCostEntities.join(", ")}` : ""} in this period.
+                  </div>
+                )}
+              </div>
 
               {/* ══ 4. ANOMALY CALLOUT CARDS ═════════════════════════ */}
               <div className="grid gap-4 md:grid-cols-3">
@@ -1201,66 +1915,153 @@ function ReportsPage() {
                   </div>
                 </div>
 
-                <div className="space-y-5">
-                  {visibleBudgets.map(({ cat, budget, spent, pct, overBudget }) => {
-                    const textColour =
-                      pct >= 100 ? "text-red-400" :
-                      pct >= 70  ? "text-amber-400" :
-                      "text-emerald-400";
-                    const strokeColor =
-                      pct >= 100 ? "stroke-red-500" :
-                      pct >= 70  ? "stroke-amber-400" :
-                      "stroke-emerald-400";
-                    const glowColor =
-                      pct >= 100 ? "rgba(239, 68, 68, 0.4)" :
-                      pct >= 70  ? "rgba(251, 191, 36, 0.4)" :
-                      "rgba(52, 211, 153, 0.4)";
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                  {/* Left Column: Concentric Recharts Visualization */}
+                  <div className="lg:col-span-2 flex flex-col justify-between bg-card/40 border border-border/30 rounded-2xl p-5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none" />
+                    
+                    <div className="text-center relative z-10">
+                      <span className="text-[10px] font-extrabold tracking-widest text-[var(--primary)] uppercase bg-[rgba(0,242,254,0.08)] px-2.5 py-1 rounded-full border border-[rgba(0,242,254,0.15)] shadow-[0_0_10px_rgba(0,242,254,0.1)] inline-block">
+                        Concentric Budget Monitor
+                      </span>
+                      <p className="text-[10px] text-muted-foreground mt-2 font-medium">
+                        Inner Ring: Budget Limit <span className="text-[var(--accent)] font-bold">🟡</span> | Outer Ring: Actual Spent <span className="text-[var(--primary)] font-bold">🔵</span>
+                      </p>
+                    </div>
 
-                    const radius = 28;
-                    const strokeDasharray = 2 * Math.PI * radius;
-                    const strokeDashoffset = strokeDasharray - (Math.min(pct, 100) / 100) * strokeDasharray;
-
-                    return (
-                      <div 
-                        key={cat} 
-                        className="group relative flex items-center gap-4 bg-muted/10 border border-border/40 p-4 rounded-2xl transition-all duration-300 hover:bg-muted/20 hover:border-primary/20 hover:shadow-luxury"
-                      >
-                        {/* Custom Glowing SVG Circular Budget Gauge */}
-                        <div className="relative w-16 h-16 flex items-center justify-center shrink-0">
-                          {/* Circular glow background */}
-                          <div 
-                            className="absolute inset-1.5 rounded-full blur-[6px] opacity-25 transition-all duration-700"
-                            style={{ backgroundColor: glowColor }}
-                          />
-                          <svg className="w-full h-full transform -rotate-90 overflow-visible">
-                            <circle
-                              cx="32"
-                              cy="32"
-                              r={radius}
-                              className="stroke-muted/60 fill-transparent stroke-[3.5px]"
-                            />
-                            <circle
-                              cx="32"
-                              cy="32"
-                              r={radius}
-                              className={cn("fill-transparent stroke-[4px] transition-all duration-1000 ease-out", strokeColor)}
-                              style={{
-                                strokeDasharray: strokeDasharray,
-                                strokeDashoffset: strokeDashoffset,
-                                strokeLinecap: "round",
-                                filter: pct >= 70 ? `drop-shadow(0 0 2px ${glowColor})` : undefined
+                    <div className="h-[230px] w-full flex items-center justify-center relative z-10">
+                      {budgetData.length === 0 ? (
+                        <div className="text-center text-xs text-muted-foreground flex flex-col items-center justify-center">
+                          <Target className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                          No budgets are currently tracked.
+                        </div>
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Tooltip
+                              content={({ active, payload }) => {
+                                if (active && payload && payload.length) {
+                                  const data = payload[0].payload;
+                                  return (
+                                    <div className="bg-[#0b1222]/95 border border-[rgba(0,242,254,0.25)] p-3.5 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.5),0_0_15px_rgba(0,242,254,0.15)] backdrop-blur-md">
+                                      <p className="text-xs font-bold text-white border-b border-border/40 pb-1.5 mb-2">{data.name}</p>
+                                      <div className="space-y-1 text-[11px]">
+                                        <div className="flex justify-between gap-6">
+                                          <span className="text-muted-foreground">Actual Spent:</span>
+                                          <span className="font-bold text-[var(--primary)] font-mono">
+                                            {formatCurrency(data.spent, "INR")}
+                                          </span>
+                                        </div>
+                                        <div className="flex justify-between gap-6">
+                                          <span className="text-muted-foreground">Allocated Limit:</span>
+                                          <span className="font-bold text-[var(--accent)] font-mono">
+                                            {formatCurrency(data.budget, "INR")}
+                                          </span>
+                                        </div>
+                                        <div className="flex justify-between gap-6 pt-1 border-t border-border/20 mt-1">
+                                          <span className="text-muted-foreground font-semibold">Budget Utilisation:</span>
+                                          <span className={cn(
+                                            "font-extrabold font-mono",
+                                            data.pct >= 100 ? "text-red-400" : data.pct >= 70 ? "text-[var(--accent)]" : "text-emerald-400"
+                                          )}>
+                                            {data.pct.toFixed(1)}%
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                }
+                                return null;
                               }}
                             />
-                          </svg>
-                          <span className={cn("absolute font-mono text-[9px] font-bold tracking-tight", textColour)}>
-                            {pct.toFixed(0)}%
-                          </span>
-                        </div>
+                            {/* Inner Ring: Budget limit per category */}
+                            <Pie
+                              data={budgetData.map((b) => ({
+                                name: b.cat,
+                                budget: b.budget,
+                                spent: b.spent,
+                                pct: b.pct,
+                                overBudget: b.overBudget
+                              }))}
+                              dataKey="budget"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={62}
+                              innerRadius={45}
+                              paddingAngle={2}
+                            >
+                              {budgetData.map((entry, index) => {
+                                const goldTones = ["#D4AF37", "#E5B842", "#F3CD6E", "#F8E0A1", "#C59B27"];
+                                const color = goldTones[index % goldTones.length];
+                                return <Cell key={`cell-inner-${index}`} fill={color} opacity={0.6} />;
+                              })}
+                            </Pie>
+                            {/* Outer Ring: Actual spent per category */}
+                            <Pie
+                              data={budgetData.map((b) => ({
+                                name: b.cat,
+                                budget: b.budget,
+                                spent: b.spent,
+                                pct: b.pct,
+                                overBudget: b.overBudget
+                              }))}
+                              dataKey="spent"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={72}
+                              outerRadius={90}
+                              paddingAngle={2}
+                            >
+                              {budgetData.map((entry, index) => {
+                                if (entry.overBudget) {
+                                  return <Cell key={`cell-outer-${index}`} fill="#EF4444" />;
+                                }
+                                const cyanTones = ["#00F2FE", "#00C6FF", "#00A8FF", "#38BDF8", "#0284C7"];
+                                const color = cyanTones[index % cyanTones.length];
+                                return <Cell key={`cell-outer-${index}`} fill={color} />;
+                              })}
+                            </Pie>
+                          </PieChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
 
-                        {/* Budget Details & Inline Controls */}
-                        <div className="flex-1 min-w-0 space-y-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-bold text-foreground truncate">{cat}</span>
+                    <div className="flex justify-center gap-4 text-[9px] font-bold tracking-tight text-muted-foreground border-t border-border/20 pt-2.5 relative z-10">
+                      <span className="flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]" /> Budget Ring (Inner)
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)]" /> Spent Ring (Outer)
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Right Column: List & Details with Inline controls & Linear SVG Gradients */}
+                  <div className="lg:col-span-3 space-y-4">
+                    {visibleBudgets.map(({ cat, budget, spent, pct, overBudget }) => {
+                      const textColour =
+                        pct >= 100 ? "text-red-400" :
+                        pct >= 70  ? "text-amber-400" :
+                        "text-emerald-400";
+                      const statusColor =
+                        pct >= 100 ? "text-red-400" :
+                        pct >= 70 ? "text-[var(--accent)]" :
+                        "text-[var(--primary)]";
+
+                      return (
+                        <div 
+                          key={cat} 
+                          className="group relative flex flex-col justify-between bg-muted/10 border border-border/40 p-4 rounded-xl transition-all duration-300 hover:bg-muted/20 hover:border-primary/20 hover:shadow-luxury"
+                        >
+                          <div className="flex items-center justify-between gap-4 mb-2">
+                            {/* Budget Title */}
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", pct >= 100 ? "bg-red-500 animate-pulse" : pct >= 70 ? "bg-[var(--accent)]" : "bg-[var(--primary)]")} />
+                              <span className="text-xs font-bold text-foreground truncate">{cat}</span>
+                            </div>
+                            
                             <button
                               onClick={() => {
                                 setTrackedCategories(trackedCategories.filter((c) => c !== cat));
@@ -1273,21 +2074,43 @@ function ReportsPage() {
                             </button>
                           </div>
 
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className={cn("text-xs font-extrabold tabular-nums", textColour)}>
-                              {formatCurrency(spent, "INR")}
-                            </span>
-                            
-                            {/* Inline Budget Limit Editor */}
-                            {editingCategory === cat ? (
-                              <div className="flex items-center gap-1">
-                                <span className="text-[10px] text-muted-foreground">/ ₹</span>
-                                <input
-                                  type="text"
-                                  value={editingValue}
-                                  onChange={(e) => setEditingValue(e.target.value.replace(/\D/g, ""))}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
+                          <div className="flex items-end justify-between flex-wrap gap-2 mb-3">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={cn("text-xs font-extrabold tabular-nums", textColour)}>
+                                {formatCurrency(spent, "INR")}
+                              </span>
+                              
+                              {/* Inline Budget Limit Editor */}
+                              {editingCategory === cat ? (
+                                <div className="flex items-center gap-1 animate-in fade-in duration-150">
+                                  <span className="text-[10px] text-muted-foreground">/ ₹</span>
+                                  <input
+                                    type="text"
+                                    value={editingValue}
+                                    onChange={(e) => setEditingValue(e.target.value.replace(/\D/g, ""))}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        const num = Number(editingValue);
+                                        if (!isNaN(num) && num > 0) {
+                                          const scale = 
+                                            budgetInterval === "Monthly" ? 1 :
+                                            budgetInterval === "Quarterly" ? 3 :
+                                            12;
+                                          const baseLimit = Math.round(num / scale);
+                                          setCategoryBudgets({
+                                            ...categoryBudgets,
+                                            [cat]: baseLimit,
+                                          });
+                                          setEditingCategory(null);
+                                          toast.success(`Updated base budget for "${cat}" to ${formatCurrency(baseLimit, "INR")}!`);
+                                        }
+                                      } else if (e.key === "Escape") {
+                                        setEditingCategory(null);
+                                      }
+                                    }}
+                                    className="w-20 h-5 text-[10px] font-bold bg-background border border-[rgba(0,242,254,0.25)] rounded px-1 focus:outline-none focus:ring-1 focus:ring-primary text-foreground text-center"
+                                    autoFocus
+                                    onBlur={() => {
                                       const num = Number(editingValue);
                                       if (!isNaN(num) && num > 0) {
                                         const scale = 
@@ -1299,71 +2122,71 @@ function ReportsPage() {
                                           ...categoryBudgets,
                                           [cat]: baseLimit,
                                         });
-                                        setEditingCategory(null);
-                                        toast.success(`Updated base budget for "${cat}" to ${formatCurrency(baseLimit, "INR")}!`);
                                       }
-                                    } else if (e.key === "Escape") {
                                       setEditingCategory(null);
-                                    }
-                                  }}
-                                  className="w-20 h-5 text-[10px] font-bold bg-background border border-border rounded px-1 focus:outline-none focus:ring-1 focus:ring-primary text-foreground text-center"
-                                  autoFocus
-                                  onBlur={() => {
-                                    const num = Number(editingValue);
-                                    if (!isNaN(num) && num > 0) {
-                                      const scale = 
-                                        budgetInterval === "Monthly" ? 1 :
-                                        budgetInterval === "Quarterly" ? 3 :
-                                        12;
-                                      const baseLimit = Math.round(num / scale);
-                                      setCategoryBudgets({
-                                        ...categoryBudgets,
-                                        [cat]: baseLimit,
-                                      });
-                                    }
-                                    setEditingCategory(null);
-                                  }}
-                                />
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1 group/btn">
-                                <span className="text-[10px] text-muted-foreground">
-                                  / {formatCurrency(budget, "INR")}
-                                </span>
-                                <button
-                                  onClick={() => {
-                                    setEditingCategory(cat);
-                                    setEditingValue(Math.round(budget).toString());
-                                  }}
-                                  className="opacity-0 group-hover/btn:opacity-100 hover:text-primary transition-opacity text-[10px] text-muted-foreground/60 cursor-pointer ml-1"
-                                  title="Edit limit"
-                                >
-                                  ✏️
-                                </button>
-                              </div>
-                            )}
+                                    }}
+                                  />
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1 group/btn">
+                                  <span className="text-[10px] text-muted-foreground">
+                                    / {formatCurrency(budget, "INR")}
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      setEditingCategory(cat);
+                                      setEditingValue(Math.round(budget).toString());
+                                    }}
+                                    className="opacity-0 group-hover/btn:opacity-100 hover:text-[var(--primary)] transition-opacity text-[10px] text-muted-foreground/60 cursor-pointer ml-1.5"
+                                    title="Edit limit"
+                                  >
+                                    ✏️
+                                  </button>
+                                </div>
+                              )}
+                            </div>
 
-                            {overBudget && (
-                              <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20 animate-pulse">
-                                OVER
+                            <div className="flex items-center gap-2">
+                              <span className={cn("text-[10px] font-bold tabular-nums font-mono", statusColor)}>
+                                {pct.toFixed(0)}% utilised
                               </span>
-                            )}
+                              {overBudget && (
+                                <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20 animate-pulse">
+                                  OVER
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Premium Glowing Custom Linear Gradient Bar */}
+                          <div className="h-1.5 w-full bg-[rgba(255,255,255,0.05)] rounded-full overflow-hidden relative">
+                            <div 
+                              className={cn(
+                                "h-full rounded-full transition-all duration-1000 ease-out", 
+                                pct >= 100 
+                                  ? "bg-gradient-to-r from-rose-500 to-red-600 shadow-[0_0_8px_#ef4444]" 
+                                  : pct >= 70 
+                                  ? "bg-gradient-to-r from-amber-400 to-[var(--accent)] shadow-[0_0_8px_var(--accent)]" 
+                                  : "bg-gradient-to-r from-[var(--primary)] to-[#00c6ff] shadow-[0_0_8px_var(--primary)]"
+                              )}
+                              style={{ width: `${Math.min(pct, 100)}%` }}
+                            />
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
 
-                  {sortedBudgets.length > 5 && (
-                    <div className="pt-2 flex justify-center border-t border-border/50">
-                      <button
-                        onClick={() => setShowAllBudgets(!showAllBudgets)}
-                        className="flex items-center gap-1 px-4 py-2 text-xs font-bold text-primary hover:text-primary-foreground border border-primary/30 hover:bg-primary bg-primary/5 rounded-lg transition-all cursor-pointer shadow-sm shadow-[0_1px_6px_rgba(212,175,55,0.1)]"
-                      >
-                        {showAllBudgets ? "Show Less (Top 5 At-Risk)" : `Show All Categories (${sortedBudgets.length})`}
-                      </button>
-                    </div>
-                  )}
+                    {sortedBudgets.length > 5 && (
+                      <div className="pt-2 flex justify-center">
+                        <button
+                          onClick={() => setShowAllBudgets(!showAllBudgets)}
+                          className="flex items-center gap-1 px-4 py-2 text-xs font-bold text-[var(--primary)] hover:text-[var(--primary-foreground)] border border-[var(--primary)]/30 hover:bg-[var(--primary)] bg-[var(--primary)]/5 rounded-lg transition-all cursor-pointer shadow-sm shadow-[0_1px_6px_rgba(0,242,254,0.15)]"
+                        >
+                          {showAllBudgets ? "Show Less (Top 5 At-Risk)" : `Show All Categories (${sortedBudgets.length})`}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -1719,21 +2542,43 @@ function ReportsPage() {
                       </div>
 
                       {useRealWebhook && (
-                        <div className="space-y-1.5 pt-1">
-                          <label className="text-[10px] uppercase font-bold text-slate-400">
-                            Webhook Target URL
-                          </label>
-                          <input
-                            type="url"
-                            value={webhookUrl}
-                            onChange={(e) => handleSaveWebhook(e.target.value)}
-                            placeholder="https://n8n.yourdomain.com/webhook/..."
-                            className="w-full text-xs bg-[#0E1629] border border-slate-700 rounded-lg p-2.5 text-slate-100 focus:outline-none focus:ring-1 focus:ring-primary placeholder-slate-500"
-                          />
-                          <p className="text-[10px] text-slate-400">
-                            Endpoint must accept a HTTP POST request with transaction JSON payload.
-                          </p>
-                        </div>
+                        <>
+                          <div className="flex items-center justify-between border-t border-slate-850/30 pt-3">
+                            <div className="flex flex-col gap-0.5 pr-2">
+                              <label className="text-xs font-semibold text-slate-200">Real-Time Auto-Sync</label>
+                              <span className="text-[10px] text-slate-400 leading-relaxed">
+                                Automatically push updates to your Google Sheet in the background whenever transactions change.
+                              </span>
+                            </div>
+                            <input
+                              type="checkbox"
+                              checked={autoSync}
+                              onChange={(e) => {
+                                setAutoSync(e.target.checked);
+                                if (typeof window !== "undefined") {
+                                  localStorage.setItem("finstream_n8n_auto_sync", e.target.checked ? "true" : "false");
+                                }
+                              }}
+                              className="w-4.5 h-4.5 text-primary bg-[#0E1629] border-slate-700 rounded focus:ring-primary focus:ring-2 cursor-pointer shrink-0"
+                            />
+                          </div>
+
+                          <div className="space-y-1.5 pt-3 border-t border-slate-850/30">
+                            <label className="text-[10px] uppercase font-bold text-slate-400">
+                              Webhook Target URL
+                            </label>
+                            <input
+                              type="url"
+                              value={webhookUrl}
+                              onChange={(e) => handleSaveWebhook(e.target.value)}
+                              placeholder="https://n8n.yourdomain.com/webhook/..."
+                              className="w-full text-xs bg-[#0E1629] border border-slate-700 rounded-lg p-2.5 text-slate-100 focus:outline-none focus:ring-1 focus:ring-primary placeholder-slate-500"
+                            />
+                            <p className="text-[10px] text-slate-400">
+                              Endpoint must accept a HTTP POST request with transaction JSON payload.
+                            </p>
+                          </div>
+                        </>
                       )}
                     </div>
 

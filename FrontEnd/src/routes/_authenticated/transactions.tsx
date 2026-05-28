@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useMemo } from "react";
+import { createFileRoute, useRouterState, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { format } from "date-fns";
-import { Loader2, Inbox, Receipt, Trash2, CalendarIcon, Plus, Pencil, X } from "lucide-react";
+import { Loader2, Inbox, Receipt, Trash2, CalendarIcon, Plus, Pencil, X, RefreshCw } from "lucide-react";
 import { DashboardSidebar } from "@/components/dashboard-sidebar";
 import { CurrencySwitcher } from "@/components/currency-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -11,7 +11,7 @@ import { useCurrency } from "@/hooks/use-currency";
 import { useBusinesses } from "@/hooks/use-businesses";
 import { formatCurrency } from "@/lib/currency";
 import { convertAmount, getRateToINR } from "@/lib/fx";
-import { cn, cleanVendorName, parseExpenseCategoryAndDescription, EXPENSE_CATEGORIES } from "@/lib/utils";
+import { cn, cleanVendorName, parseExpenseCategoryAndDescription, EXPENSE_CATEGORIES, classifyExpense, normalizeCategory } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -82,12 +82,35 @@ function TransactionsPage() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [adding, setAdding] = useState(false);
+
+  const search = useRouterState({ select: (s) => s.location.search }) as any;
+  const navigate = useNavigate();
+  const editId = search.edit;
+
+  // Open Edit sheet if editId is provided in URL query params
+  useEffect(() => {
+    if (editId && items.length > 0) {
+      const found = items.find((item) => item.id === editId);
+      if (found) {
+        setEditing(found);
+      }
+    }
+  }, [editId, items]);
+
+  // Strip query param once user finishes or cancels editing
+  useEffect(() => {
+    if (!editing && search.edit) {
+      void navigate({
+        search: {} as any,
+      });
+    }
+  }, [editing, search.edit]);
   const [deleting, setDeleting] = useState<Expense | null>(null);
   const [saving, setSaving] = useState(false);
   const [mainTab, setMainTab] = useState<MainTab>("all");
   const [businessCompany, setBusinessCompany] = useState<string>("all");
   const [filterDuplicates, setFilterDuplicates] = useState<"all" | "hide_duplicates" | "duplicates_only">("all");
-  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "amount_desc" | "amount_asc" | "vendor_asc">("date_desc");
+  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "amount_desc" | "amount_asc" | "vendor_asc" | "entry_desc" | "entry_asc">("date_desc");
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [resolvingDuplicate, setResolvingDuplicate] = useState<Expense | null>(null);
@@ -111,6 +134,9 @@ function TransactionsPage() {
   const [syncStep, setSyncStep] = useState(0);
   const [syncProgress, setSyncProgress] = useState(0);
   const [syncError, setSyncError] = useState("");
+  const [autoSync, setAutoSync] = useState(() => typeof window !== "undefined" ? localStorage.getItem("finstream_n8n_auto_sync") === "true" : false);
+  const [isAutoSyncing, setIsAutoSyncing] = useState(false);
+  const isFirstMount = useRef(true);
 
   useEffect(() => {
     setSelectedIds(new Set());
@@ -124,6 +150,7 @@ function TransactionsPage() {
   const [formCurrency, setFormCurrency] = useState("INR");
   const [formCompanyEntity, setFormCompanyEntity] = useState<"KS" | "TI" | "CPM" | "AAS" | "Swati" | "Others" | "None">("None");
   const [formExpenseCategory, setFormExpenseCategory] = useState("Other expenses");
+  const [formCostType, setFormCostType] = useState<"Direct" | "Indirect" | "None">("None");
   const [formDescription, setFormDescription] = useState("");
   const [formDate, setFormDate] = useState("");
 
@@ -178,17 +205,16 @@ function TransactionsPage() {
 
   const startEditing = (e: Expense) => {
     setEditing(e);
-    setFormCategory(
-      (e.main_category || e.category) === "Business"
-        ? "Business"
-        : "Personal"
-    );
+    const mainCat = (e.main_category || e.category) === "Business"
+      ? "Business"
+      : "Personal";
+    setFormCategory(mainCat);
     setFormVendor(cleanVendorName(e.vendor));
     setFormAmount(Number(e.amount) || 0);
     setFormCurrency(e.currency || "INR");
     setFormDate(e.date || e.created_at || new Date().toISOString());
 
-    const expenseCategory = e.expense_category || "Other expenses";
+    const expenseCategory = normalizeCategory(e.expense_category || "Other expenses");
     let description = e.raw_text || "";
 
     if (e.raw_text && e.raw_text.includes(" · ")) {
@@ -210,6 +236,14 @@ function TransactionsPage() {
       }
     }
     setFormCompanyEntity(entity);
+
+    // Initialize Cost Type state dynamically
+    if (mainCat === "Personal") {
+      setFormCostType("None");
+    } else {
+      const classified = classifyExpense(e);
+      setFormCostType(classified.type === "Direct" ? "Direct" : classified.type === "Indirect" ? "Indirect" : "None");
+    }
   };
 
   const startAdding = () => {
@@ -220,6 +254,7 @@ function TransactionsPage() {
     setFormCurrency("INR");
     setFormCompanyEntity("None");
     setFormExpenseCategory("Other expenses");
+    setFormCostType("None");
     setFormDescription("");
     setFormDate(new Date().toISOString());
   };
@@ -231,6 +266,54 @@ function TransactionsPage() {
         .map((e) => e.company_entity!),
     ),
   ).sort();
+
+  const DIRECT_CATEGORIES = useMemo(() => [
+    "Raw Material",
+    "Labour & Wages",
+    "Electricity & Power",
+    "Water",
+    "Repairs & Maintenance",
+    "Goods Carriage & Transport",
+    "Factory-Related Expenses"
+  ], []);
+
+  const INDIRECT_CATEGORIES = useMemo(() => [
+    "Travel & Logistics",
+    "Salaries & Admin",
+    "Marketing & Ads",
+    "Software & Tech",
+    "General Overhead",
+    "Professional & Legal",
+    "Rent & Facilities",
+    "Taxes & Compliance",
+    "Other Indirect"
+  ], []);
+
+  const availableCategories = useMemo(() => {
+    if (formCategory === "Personal") {
+      return EXPENSE_CATEGORIES;
+    }
+    if (formCostType === "Direct") {
+      const list = [...DIRECT_CATEGORIES];
+      if (formExpenseCategory && !list.includes(formExpenseCategory)) {
+        list.push(formExpenseCategory);
+      }
+      return list;
+    }
+    if (formCostType === "Indirect") {
+      const list = [...INDIRECT_CATEGORIES];
+      if (formExpenseCategory && !list.includes(formExpenseCategory)) {
+        list.push(formExpenseCategory);
+      }
+      return list;
+    }
+    // None
+    const list = [...DIRECT_CATEGORIES, ...INDIRECT_CATEGORIES];
+    if (formExpenseCategory && !list.includes(formExpenseCategory)) {
+      list.push(formExpenseCategory);
+    }
+    return list;
+  }, [formCategory, formCostType, formExpenseCategory, DIRECT_CATEGORIES, INDIRECT_CATEGORIES]);
 
   // Pre-calculate exact duplicate counts in items array to make duplicate checks extremely fast
   const duplicateCounts = new Map<string, number>();
@@ -287,6 +370,16 @@ function TransactionsPage() {
       if (sortBy === "amount_asc") {
         return a.amount - b.amount;
       }
+      if (sortBy === "entry_desc") {
+        const timeA = new Date(a.created_at).getTime();
+        const timeB = new Date(b.created_at).getTime();
+        return timeB - timeA;
+      }
+      if (sortBy === "entry_asc") {
+        const timeA = new Date(a.created_at).getTime();
+        const timeB = new Date(b.created_at).getTime();
+        return timeA - timeB;
+      }
       if (sortBy === "vendor_asc") {
         const vendorA = (a.vendor || "").toLowerCase().trim();
         const vendorB = (b.vendor || "").toLowerCase().trim();
@@ -326,6 +419,66 @@ function TransactionsPage() {
       supabase.removeChannel(channel);
     };
   }, [user]);
+
+  useEffect(() => {
+    if (!user || !autoSync || !webhookUrl || !useRealWebhook) return;
+    
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+
+    // Debounce background auto-sync by 2.5 seconds
+    const timer = setTimeout(async () => {
+      setIsAutoSyncing(true);
+      console.log("[Auto-Sync] Initiating automatic background sync to Google Sheets...");
+
+      const chronologicalTransactions = [...sortedAndFiltered].sort((a, b) => {
+        const dateA = a.date ? new Date(a.date).getTime() : new Date(a.created_at).getTime();
+        const dateB = b.date ? new Date(b.date).getTime() : new Date(b.created_at).getTime();
+        return dateA - dateB;
+      });
+
+      const payload = {
+        export_time: new Date().toISOString(),
+        timeframe: "Transactions Auto-Sync",
+        total_amount_inr: chronologicalTransactions.reduce((sum, item) => sum + convertAmount(item.amount, item.currency, "INR", item.created_at), 0),
+        transaction_count: chronologicalTransactions.length,
+        ai_summary: "FinStream Ledger Transactions Real-Time Auto-Sync",
+        transactions: chronologicalTransactions.map((r) => ({
+          date: (r.date || r.created_at).split("T")[0],
+          vendor: r.vendor || "Unknown",
+          category: r.category || "Business",
+          entity: r.company_entity || "None",
+          expense_category: r.expense_category || "Other expenses",
+          description: r.raw_text || "",
+          amount_inr: convertAmount(Number(r.amount) || 0, r.currency || "INR", "INR", r.created_at),
+          currency: r.currency,
+        }))
+      };
+
+      try {
+        const res = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "bypass-tunnel-reminder": "true"
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          throw new Error(`Sync error: ${res.status}`);
+        }
+        console.log("[Auto-Sync] Google Sheets synchronized successfully in the background.");
+      } catch (err) {
+        console.error("[Auto-Sync] Background auto-sync failed:", err);
+      } finally {
+        setIsAutoSyncing(false);
+      }
+    }, 2500);
+
+    return () => clearTimeout(timer);
+  }, [items, autoSync, webhookUrl, useRealWebhook, user]);
 
   const handleSave = async () => {
     if (!editing || !user) {
@@ -575,7 +728,7 @@ function TransactionsPage() {
           raw_text: finalRawText,
           user_id: user.id,
           business_id: linkedBusinessId,
-          created_at: isoDateStr,
+          created_at: new Date().toISOString(),
           date: dateStr,
           main_category: formCategory,
           company_entity: finalCompanyEntity,
@@ -596,7 +749,7 @@ function TransactionsPage() {
             raw_text: finalRawText,
             user_id: user.id,
             business_id: linkedBusinessId,
-            created_at: isoDateStr,
+            created_at: new Date().toISOString(),
           })
           .select()
           .single();
@@ -745,19 +898,17 @@ function TransactionsPage() {
       
       const finalCategory = isCategoryModified ? bulkCategory : "keep";
       
-      if (finalCategory === "Personal") {
-        updatePayload.company_entity = "None";
-        updatePayload.business_id = null;
-      } else {
-        if (isCompanyModified) {
-          updatePayload.company_entity = bulkCompanyEntity;
-          if (bulkCompanyEntity === "None") {
-            updatePayload.business_id = null;
-          } else {
-            const bizId = await resolveBusinessId(bulkCompanyEntity);
-            updatePayload.business_id = bizId;
-          }
+      if (isCompanyModified) {
+        updatePayload.company_entity = bulkCompanyEntity;
+        if (bulkCompanyEntity === "None") {
+          updatePayload.business_id = null;
+        } else {
+          const bizId = await resolveBusinessId(bulkCompanyEntity);
+          updatePayload.business_id = bizId;
         }
+      } else if (finalCategory === "Personal") {
+        // Only clear business_id linkage, but preserve existing company_entity
+        updatePayload.business_id = null;
       }
       
       if (isExpenseCategoryModified) {
@@ -803,9 +954,7 @@ function TransactionsPage() {
           if (isCategoryModified) {
             rulePayload.main_category = bulkCategory;
           }
-          if (finalCategory === "Personal") {
-            rulePayload.company_entity = "None";
-          } else if (isCompanyModified) {
+          if (isCompanyModified) {
             rulePayload.company_entity = bulkCompanyEntity;
           }
           if (isExpenseCategoryModified) {
@@ -824,7 +973,7 @@ function TransactionsPage() {
               user_id: user.id,
               vendor_pattern: cleanVendor,
               main_category: isCategoryModified ? bulkCategory : "Personal",
-              company_entity: finalCategory === "Personal" ? "None" : (isCompanyModified ? bulkCompanyEntity : "None"),
+              company_entity: isCompanyModified ? bulkCompanyEntity : "None",
               expense_category: isExpenseCategoryModified ? bulkExpenseCategory : "Other expenses",
             });
           }
@@ -1001,6 +1150,12 @@ function TransactionsPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
               <Receipt className="w-5 h-5" /> Transactions
+              {isAutoSyncing && (
+                <span className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/25 animate-pulse ml-2">
+                  <RefreshCw className="w-3 h-3 animate-spin text-emerald-400" />
+                  Auto-Syncing Sheets...
+                </span>
+              )}
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               All your captured expenses, converted to your display currency.
@@ -1116,12 +1271,14 @@ function TransactionsPage() {
                   value={sortBy}
                   onValueChange={(v) => setSortBy(v as any)}
                 >
-                  <SelectTrigger className="w-[155px] h-8 text-xs bg-background">
+                  <SelectTrigger className="w-[195px] h-8 text-xs bg-background">
                     <SelectValue placeholder="Sort by..." />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="date_desc">Date (Newest First)</SelectItem>
                     <SelectItem value="date_asc">Date (Oldest First)</SelectItem>
+                    <SelectItem value="entry_desc">Entry added to ledger (Newest First)</SelectItem>
+                    <SelectItem value="entry_asc">Entry added to ledger (Oldest First)</SelectItem>
                     <SelectItem value="amount_desc">Amount (High to Low)</SelectItem>
                     <SelectItem value="amount_asc">Amount (Low to High)</SelectItem>
                     <SelectItem value="vendor_asc">Vendor (A-Z)</SelectItem>
@@ -1408,6 +1565,12 @@ function TransactionsPage() {
                   onValueChange={(v) => {
                     const cat = v as "Business" | "Personal";
                     setFormCategory(cat);
+                    if (cat === "Personal") {
+                      setFormCostType("None");
+                    } else {
+                      setFormCostType("Direct");
+                      setFormExpenseCategory("Raw Material");
+                    }
                   }}
                 >
                   <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
@@ -1439,6 +1602,33 @@ function TransactionsPage() {
                 </Select>
               </div>
 
+              <div className="space-y-2">
+                <Label>Cost Type</Label>
+                <Select
+                  disabled={formCategory === "Personal"}
+                  value={formCostType}
+                  onValueChange={(v) => {
+                    const newType = v as "Direct" | "Indirect" | "None";
+                    setFormCostType(newType);
+                    if (newType === "Direct") {
+                      setFormExpenseCategory("Raw Material");
+                    } else if (newType === "Indirect") {
+                      setFormExpenseCategory("Travel & Logistics");
+                    } else {
+                      setFormExpenseCategory("Other expenses");
+                    }
+                  }}
+                >
+                  <SelectTrigger className="bg-background">
+                    <SelectValue placeholder="Select type..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Direct">Direct Cost</SelectItem>
+                    <SelectItem value="Indirect">Indirect Cost</SelectItem>
+                    <SelectItem value="None">None</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
               <div className="space-y-2">
                 <Label>Expense Category</Label>
@@ -1448,7 +1638,7 @@ function TransactionsPage() {
                 >
                   <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {EXPENSE_CATEGORIES.map((c) => (
+                    {availableCategories.map((c) => (
                       <SelectItem key={c} value={c}>{c}</SelectItem>
                     ))}
                   </SelectContent>
@@ -1569,6 +1759,12 @@ function TransactionsPage() {
                 onValueChange={(v) => {
                   const cat = v as "Business" | "Personal";
                   setFormCategory(cat);
+                  if (cat === "Personal") {
+                    setFormCostType("None");
+                  } else {
+                    setFormCostType("Direct");
+                    setFormExpenseCategory("Raw Material");
+                  }
                 }}
               >
                 <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
@@ -1600,6 +1796,33 @@ function TransactionsPage() {
               </Select>
             </div>
 
+            <div className="space-y-2">
+              <Label>Cost Type</Label>
+              <Select
+                disabled={formCategory === "Personal"}
+                value={formCostType}
+                onValueChange={(v) => {
+                  const newType = v as "Direct" | "Indirect" | "None";
+                  setFormCostType(newType);
+                  if (newType === "Direct") {
+                    setFormExpenseCategory("Raw Material");
+                  } else if (newType === "Indirect") {
+                    setFormExpenseCategory("Travel & Logistics");
+                  } else {
+                    setFormExpenseCategory("Other expenses");
+                  }
+                }}
+              >
+                <SelectTrigger className="bg-background">
+                  <SelectValue placeholder="Select type..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Direct">Direct Cost</SelectItem>
+                  <SelectItem value="Indirect">Indirect Cost</SelectItem>
+                  <SelectItem value="None">None</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
             <div className="space-y-2">
               <Label>Expense Category</Label>
@@ -1609,7 +1832,7 @@ function TransactionsPage() {
               >
                 <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {EXPENSE_CATEGORIES.map((c) => (
+                  {availableCategories.map((c) => (
                     <SelectItem key={c} value={c}>{c}</SelectItem>
                   ))}
                 </SelectContent>
@@ -1712,7 +1935,7 @@ function TransactionsPage() {
               <Select
                 value={bulkCompanyEntity}
                 onValueChange={(v) => setBulkCompanyEntity(v as any)}
-                disabled={bulkCategory === "Personal"}
+
               >
                 <SelectTrigger className="bg-background">
                   <SelectValue />
@@ -2015,21 +2238,43 @@ function TransactionsPage() {
                       </div>
 
                       {useRealWebhook && (
-                        <div className="space-y-1.5 pt-1">
-                          <label className="text-[10px] uppercase font-bold text-slate-400">
-                            Webhook Target URL
-                          </label>
-                          <input
-                            type="url"
-                            value={webhookUrl}
-                            onChange={(e) => handleSaveWebhook(e.target.value)}
-                            placeholder="http://localhost:5678/webhook/..."
-                            className="w-full text-xs bg-[#0E1629] border border-slate-700 rounded-lg p-2.5 text-slate-100 focus:outline-none focus:ring-1 focus:ring-primary placeholder-slate-500"
-                          />
-                          <p className="text-[10px] text-slate-400">
-                            Endpoint must accept a HTTP POST request with transaction JSON payload.
-                          </p>
-                        </div>
+                        <>
+                          <div className="flex items-center justify-between border-t border-slate-850/30 pt-3">
+                            <div className="flex flex-col gap-0.5 pr-2">
+                              <label className="text-xs font-semibold text-slate-200">Real-Time Auto-Sync</label>
+                              <span className="text-[10px] text-slate-400 leading-relaxed">
+                                Automatically push updates to your Google Sheet in the background whenever transactions change.
+                              </span>
+                            </div>
+                            <input
+                              type="checkbox"
+                              checked={autoSync}
+                              onChange={(e) => {
+                                setAutoSync(e.target.checked);
+                                if (typeof window !== "undefined") {
+                                  localStorage.setItem("finstream_n8n_auto_sync", e.target.checked ? "true" : "false");
+                                }
+                              }}
+                              className="w-4.5 h-4.5 text-primary bg-[#0E1629] border-slate-700 rounded focus:ring-primary focus:ring-2 cursor-pointer shrink-0"
+                            />
+                          </div>
+
+                          <div className="space-y-1.5 pt-3 border-t border-slate-850/30">
+                            <label className="text-[10px] uppercase font-bold text-slate-400">
+                              Webhook Target URL
+                            </label>
+                            <input
+                              type="url"
+                              value={webhookUrl}
+                              onChange={(e) => handleSaveWebhook(e.target.value)}
+                              placeholder="http://localhost:5678/webhook/..."
+                              className="w-full text-xs bg-[#0E1629] border border-slate-700 rounded-lg p-2.5 text-slate-100 focus:outline-none focus:ring-1 focus:ring-primary placeholder-slate-500"
+                            />
+                            <p className="text-[10px] text-slate-400">
+                              Endpoint must accept a HTTP POST request with transaction JSON payload.
+                            </p>
+                          </div>
+                        </>
                       )}
                     </div>
 

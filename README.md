@@ -123,7 +123,6 @@ GOOGLE_GEMINI_API_KEY="your-google-gemini-api-key"
 ![Reports page 1](Screenshots/finstreamai-Reports-Page-1.png)
 ![Reports page 2](Screenshots/finstreamai-Reports-Page-2.png)
 ![Reports page 3](Screenshots/finstreamai-Reports-Page-3.png)
-![Figma mockup](Screenshots/finstreamai-figma-mockup.png)
 
 ## 🎥 GIF Demos
 
@@ -154,9 +153,8 @@ GOOGLE_GEMINI_API_KEY="your-google-gemini-api-key"
 ## 👨‍💻 Creator Information
 
 - **Creator:** FinStream AI Portfolio Project
-- **Built by:** [Your Name](https://github.com/your-github)
-- **Contact:** your.email@example.com
-- **Portfolio:** `https://your-portfolio.example.com`
+- **Built by:** [Swati Maheshwari](https://github.com/swati1987-blip)
+- **Contact:** swati@totalas.in
 
 ## 📄 License
 

@@ -115,7 +115,7 @@ GOOGLE_GEMINI_API_KEY="your-google-gemini-api-key"
 ## 📸 Screenshots
 
 ![Login page](Screenshots/finstreamai-login-page.png)
-![Dashboard page 1](Screenshots/finstreamai-Dashboard.png)
+![Dashboard page 1](Screenshots/finstreamai-dashboard.png)
 ![Transaction ledger](Screenshots/finstreamai-TransactionLedger-Page.png)
 ![Direct cost page 1](Screenshots/finstreamai-DirectCost-Page-1.png)
 ![Direct cost page 2](Screenshots/finstream_DirectCost-Page-2.png)

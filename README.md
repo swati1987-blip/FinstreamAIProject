@@ -53,7 +53,7 @@ flowchart LR
 - ✅ Secure Supabase authentication, signup, and password reset
 - ✅ AI-driven bank/credit card statement parsing
 - ✅ Transaction extraction with vendor, date, amount, currency, category, and description of expense through image, pdf, voice note or narration
-- ✅ Multi-entity / multi-division financial ledger tracking
+- ✅ Multi-entity / multi-currency financial ledger tracking
 - ✅ Direct cost, indirect cost, and raw-material reporting
 - ✅ Google Sheets export and automatic sync helpers
 - ✅ Responsive dashboard with ledger charts and audit insights

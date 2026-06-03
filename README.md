@@ -26,57 +26,60 @@ Manual statement processing is slow, error-prone, and difficult to standardize a
 
 ## 🧩 Solution Architecture
 
+This section describes the key data flow for FinStream AI: user ingestion, AI parsing, Supabase storage, realtime dashboard updates, and spreadsheet sync.
+
+```mermaid
 flowchart TD
     %% Core Inputs & Ingestion
     A1[User Upload: Image / PDF / Voice] -->|Direct HTTP POST| B[Frontend React UI]
-    A2[Bank / Credit Card Statements] -->|Webhook Sync / File Drop| H1[Make.com Automation]
-    
+    A2[Bank / Credit Card Statements] -->|Webhook / File Drop| H1[Automation / Pre-processing]
+
     %% Ingestion Routing to AI
     B -->|Payload Forward| D[AI Gateway]
     H1 -->|Pre-parsed Stream| D
-    
+
     %% AI Processing Layer
-    D -->|Context Routing| E[Antigravity AI - Gemini Powered]
+    D -->|Context Routing| E[AI Parser: Gemini / Antigravity]
     E -->|Extraction & Classification| F[Structured Transaction JSON]
-    
+
     %% Storage & Central Synchronization
     F -->|Insert / Upsert Rows| C[(Supabase Auth + DB)]
-    B <--->|Session & State Management| C
-    C -->|Real-time Subscriptions| I[Real-time Supabase Updates]
-    I -->|Live State Injection| G[Dashboard / Reports / Direct-Indirect Costs]
-    
-    %% Improved Export & Sync Architecture
-    G -->|One-Click Trigger| H2[n8n Sync Engine]
-    C -->|Database Webhooks / Changed Rows| H2
-    H2 <--->|Bi-directional Append & Match| H3[[Google Sheets Export / Sync]]
-    
-    %% Operations Downstream
-    H3 --> J[BackOffice Finance Workflows]
+    B <--->|Session & State| C
+    C -->|Realtime Updates| I[Supabase Realtime]
+    I -->|Live State| G[Dashboard / Reports]
 
-    %% Structural Grouping & Styling
+    %% Export & Sync Architecture
+    G -->|Sync Trigger| H2[Sheet Sync Service]
+    C -->|DB Change / Webhook| H2
+    H2 <--->|Append / Match| H3[[Google Sheets Export / Sync]]
+
+    %% Operations Downstream
+    H3 --> J[Backoffice Finance Workflows]
+
+    %% Structural Grouping
     subgraph Data Ingestion
-    A1
-    A2
-    B
-    H1
+        A1
+        A2
+        B
+        H1
     end
 
     subgraph Intelligence Layer
-    D
-    E
-    F
+        D
+        E
+        F
     end
 
-    subgraph Data Fabric
-    C
-    I
-    G
+    subgraph Data Layer
+        C
+        I
+        G
     end
 
-    subgraph Pipeline Automation
-    H2
-    H3
-    J
+    subgraph Export Pipeline
+        H2
+        H3
+        J
     end
 
     style H1 fill:#ea580c,stroke:#333,stroke-width:1px,color:#fff
@@ -84,6 +87,7 @@ flowchart TD
     style H3 fill:#16a34a,stroke:#333,stroke-width:2px,color:#fff
     style E fill:#9333ea,stroke:#333,stroke-width:2px,color:#fff
     style C fill:#0284c7,stroke:#333,stroke-width:2px,color:#fff
+```
 
 ### Architecture Summary
 

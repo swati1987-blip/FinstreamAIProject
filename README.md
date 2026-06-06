@@ -1,6 +1,6 @@
 # FinStream AI
 
-> Finstream AI is a premium AI-powered financial ledger SaaS prototype and cost intelligence platform built for corporate expense orchestration, statement parsing, and report automation, specially for Indian manufacturing businesses and multi-entity business owners. 
+> Finstream AI is a premium customized AI-powered financial ledger SaaS prototype and cost intelligence platform built for corporate expense orchestration, statement parsing, and report automation, specially for Indian manufacturing businesses and multi-entity business owners. 
 
 ## 🚀 Product Overview
 
@@ -100,7 +100,7 @@ flowchart TD
 ## ✨ Key Features
 
 - ✅ Secure Supabase authentication, signup, and password reset
-- ✅ AI-driven credit card statement parsing
+- ✅ AI-driven credit card statement (It shouldnt be password protected) parsing
 - ✅ Transaction extraction with vendor, date, amount, currency, category, and description of expense through image, pdf, voice note or narration
 - ✅ Multi-entity / multi-currency financial ledger tracking
 - ✅ Direct cost, indirect cost, and raw-material reporting
@@ -187,18 +187,17 @@ Add animated workflow demos to the repo when available. Replace these placeholde
 
 - **Live demo:** https://finstream-ai.example.com — replace with your production URL.
 - **Public login page:** https://tanstack-start-app.finstreamai.workers.dev/login
-- **Staging preview:** https://staging.finstream-ai.example.com
-- **Google Sheets sync demo:** https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID (replace YOUR_SHEET_ID)
+- **Google Sheets sync demo:** (https://docs.google.com/spreadsheets/d/1bHIPSsCFYGYcTG-AGqiuLIlZObOKh_Myn86o0bghvNk/edit?gid=0#gid=0)
 
-> These are placeholders — update or remove before publishing.
 
 ## 🚀 Future Roadmap
 
-- Add full Excel / PDF statement ingestion support
+- GST input credit calculator + GSTIN tagging
 - Build a native expense approval workflow
-- Add advanced audit trail reporting for C-suite review
-- Add multi-currency conversion and analytics
-- Add webhook connectors for ERP and bank feeds
+- WhatsApp alerts for budget breaches
+- Tally export integration
+- AI-powered CA assistant chatbot (RAG over past expenses)
+- Direct Open Banking API integrations to automate ledger inputs — eliminating manual data entry entirely.
 - Add user roles, permissions, and team management
 
 ## 👨‍💻 Creator Information

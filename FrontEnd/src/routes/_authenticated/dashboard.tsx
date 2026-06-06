@@ -301,7 +301,7 @@ function fileToDataUrl(file: File): Promise<string> {
 function Dashboard() {
   const { user } = useAuth();
   const parseFn = useServerFn(parseExpenseWithAI);
-  const { currency: displayCurrency } = useCurrency();
+  const { currency: displayCurrency, ratesVersion } = useCurrency();
   const { businesses, addBusiness } = useBusinesses();
 
   const [rawText, setRawText] = useState("");
@@ -463,7 +463,7 @@ function Dashboard() {
         Number(e.amount) || 0,
         e.currency || "INR",
         displayCurrency,
-        e.created_at,
+        e.date || e.created_at,
       );
       total += amt;
       totalCount++;
@@ -476,25 +476,39 @@ function Dashboard() {
       }
     }
     return { total, business, personal, totalCount, businessCount, personalCount };
-  }, [expenses, displayCurrency, selectedPeriod]);
+  }, [expenses, displayCurrency, selectedPeriod, ratesVersion]);
 
   const potentialDuplicates = useMemo(() => {
     const duplicates = new Set<string>();
-    const seen = new Map<string, string>(); // key -> id
-    
-    for (const e of expenses) {
+    const groups = new Map<string, typeof expenses>();
+    expenses.forEach((e) => {
       const vendorName = cleanVendorName(e.vendor || "").toLowerCase().trim();
       const amountVal = Number(e.amount).toFixed(2);
       const dateStr = e.date || e.created_at.slice(0, 10);
-      
       const key = `${vendorName}-${amountVal}-${dateStr}`;
-      if (seen.has(key)) {
-        duplicates.add(e.id);
-        duplicates.add(seen.get(key)!);
-      } else {
-        seen.set(key, e.id);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(e);
+    });
+    groups.forEach((group) => {
+      if (group.length <= 1) return;
+      for (let i = 0; i < group.length; i++) {
+        const e1 = group[i];
+        const time1 = new Date(e1.created_at).getTime();
+        let hasDistantlyCreatedPair = false;
+        for (let j = 0; j < group.length; j++) {
+          if (i === j) continue;
+          const e2 = group[j];
+          const time2 = new Date(e2.created_at).getTime();
+          if (Math.abs(time1 - time2) >= 20000) {
+            hasDistantlyCreatedPair = true;
+            break;
+          }
+        }
+        if (hasDistantlyCreatedPair) {
+          duplicates.add(e1.id);
+        }
       }
-    }
+    });
     return duplicates;
   }, [expenses]);
 
@@ -644,24 +658,84 @@ function Dashboard() {
         if (parsed.line_items && parsed.line_items.length > 0) {
           for (const item of parsed.line_items) {
             const itemExpCat = (item.description || "").toLowerCase().includes("raw material") ? "Raw material" : expenseCategory;
-            const { data: inserted, error } = await supabase
-              .from("expenses")
-              .insert({
-                amount: item.amount,
-                vendor: item.vendor || parsed.vendor,
-                category: parsed.category,
-                currency: detectedCurrency,
-                raw_text: item.description || parsed.description || `[${kind}] ${file.name}`,
-                user_id: user.id,
-                business_id: linkedBusiness,
-                created_at: new Date().toISOString(),
-                date: effectiveDateStr,
-                main_category: mainCategoryVal,
-                company_entity: entityName,
-                expense_category: itemExpCat,
-              })
-              .select()
-              .single();
+            let inserted: any = null;
+            let error: any = null;
+
+            try {
+              const res = await supabase
+                .from("expenses")
+                .insert({
+                  amount: item.amount,
+                  vendor: item.vendor || parsed.vendor,
+                  category: parsed.category,
+                  currency: detectedCurrency,
+                  raw_text: item.description || parsed.description || (parsed.vendor ? `${expenseCategory} · ${item.vendor || parsed.vendor}` : expenseCategory),
+                  user_id: user.id,
+                  business_id: linkedBusiness,
+                  created_at: new Date().toISOString(),
+                  date: effectiveDateStr,
+                  main_category: mainCategoryVal,
+                  company_entity: entityName,
+                  expense_category: itemExpCat,
+                })
+                .select()
+                .single();
+              inserted = res.data;
+              error = res.error;
+            } catch (e: any) {
+              error = e;
+            }
+
+            if (error && (error.code === "42703" || (error.message && error.message.includes("column")))) {
+              console.warn("[Dashboard] Scan insert Tier 1 failed (column undefined). Retrying Tier 2 (without main_category)...");
+              try {
+                const res = await supabase
+                  .from("expenses")
+                  .insert({
+                    amount: item.amount,
+                    vendor: item.vendor || parsed.vendor,
+                    category: parsed.category,
+                    currency: detectedCurrency,
+                    raw_text: item.description || parsed.description || (parsed.vendor ? `${expenseCategory} · ${item.vendor || parsed.vendor}` : expenseCategory),
+                    user_id: user.id,
+                    business_id: linkedBusiness,
+                    created_at: new Date().toISOString(),
+                    date: effectiveDateStr,
+                    company_entity: entityName,
+                    expense_category: itemExpCat,
+                  })
+                  .select()
+                  .single();
+                inserted = res.data;
+                error = res.error;
+              } catch (e: any) {
+                error = e;
+              }
+            }
+
+            if (error && (error.code === "42703" || (error.message && error.message.includes("column")))) {
+              console.warn("[Dashboard] Scan insert Tier 2 failed (column undefined). Retrying Tier 3 (legacy)...");
+              try {
+                const res = await supabase
+                  .from("expenses")
+                  .insert({
+                    amount: item.amount,
+                    vendor: item.vendor || parsed.vendor,
+                    category: parsed.category,
+                    currency: detectedCurrency,
+                    raw_text: item.description || parsed.description || (parsed.vendor ? `${expenseCategory} · ${item.vendor || parsed.vendor}` : expenseCategory),
+                    user_id: user.id,
+                    business_id: linkedBusiness,
+                    created_at: new Date().toISOString(),
+                  })
+                  .select()
+                  .single();
+                inserted = res.data;
+                error = res.error;
+              } catch (e: any) {
+                error = e;
+              }
+            }
 
             if (error) throw error;
 
@@ -680,24 +754,84 @@ function Dashboard() {
         }
 
         // ── Standard single-item insert ──────────────────────────────────
-        const { data: inserted, error } = await supabase
-          .from("expenses")
-          .insert({
-            amount: parsed.amount,
-            vendor: parsed.vendor,
-            category: parsed.category,
-            currency: detectedCurrency,
-            raw_text: parsed.description || `[${kind}] ${file.name}`,
-            user_id: user.id,
-            business_id: linkedBusiness,
-            created_at: new Date().toISOString(),
-            date: effectiveDateStr,
-            main_category: mainCategoryVal,
-            company_entity: entityName,
-            expense_category: expenseCategory,
-          })
-          .select()
-          .single();
+        let inserted: any = null;
+        let error: any = null;
+
+        try {
+          const res = await supabase
+            .from("expenses")
+            .insert({
+              amount: parsed.amount,
+              vendor: parsed.vendor,
+              category: parsed.category,
+              currency: detectedCurrency,
+              raw_text: parsed.description || (parsed.vendor ? `${expenseCategory} · ${parsed.vendor}` : expenseCategory),
+              user_id: user.id,
+              business_id: linkedBusiness,
+              created_at: new Date().toISOString(),
+              date: effectiveDateStr,
+              main_category: mainCategoryVal,
+              company_entity: entityName,
+              expense_category: expenseCategory,
+            })
+            .select()
+            .single();
+          inserted = res.data;
+          error = res.error;
+        } catch (e: any) {
+          error = e;
+        }
+
+        if (error && (error.code === "42703" || (error.message && error.message.includes("column")))) {
+          console.warn("[Dashboard] Scan insert Tier 1 failed (column undefined). Retrying Tier 2 (without main_category)...");
+          try {
+            const res = await supabase
+              .from("expenses")
+              .insert({
+                amount: parsed.amount,
+                vendor: parsed.vendor,
+                category: parsed.category,
+                currency: detectedCurrency,
+                raw_text: parsed.description || (parsed.vendor ? `${expenseCategory} · ${parsed.vendor}` : expenseCategory),
+                user_id: user.id,
+                business_id: linkedBusiness,
+                created_at: new Date().toISOString(),
+                date: effectiveDateStr,
+                company_entity: entityName,
+                expense_category: expenseCategory,
+              })
+              .select()
+              .single();
+            inserted = res.data;
+            error = res.error;
+          } catch (e: any) {
+            error = e;
+          }
+        }
+
+        if (error && (error.code === "42703" || (error.message && error.message.includes("column")))) {
+          console.warn("[Dashboard] Scan insert Tier 2 failed (column undefined). Retrying Tier 3 (legacy)...");
+          try {
+            const res = await supabase
+              .from("expenses")
+              .insert({
+                amount: parsed.amount,
+                vendor: parsed.vendor,
+                category: parsed.category,
+                currency: detectedCurrency,
+                raw_text: parsed.description || (parsed.vendor ? `${expenseCategory} · ${parsed.vendor}` : expenseCategory),
+                user_id: user.id,
+                business_id: linkedBusiness,
+                created_at: new Date().toISOString(),
+              })
+              .select()
+              .single();
+            inserted = res.data;
+            error = res.error;
+          } catch (e: any) {
+            error = e;
+          }
+        }
 
         if (error) throw error;
 
@@ -715,9 +849,14 @@ function Dashboard() {
         });
 
         successCount++;
-      } catch (err) {
+      } catch (err: any) {
         console.error(`Failed to batch-process "${file.name}":`, err);
-        failCount++;
+        const errMsg = err?.message || err?.toString() || "";
+        if (errMsg.includes("Rejection:") || errMsg.includes("rejected") || errMsg.includes("missing")) {
+          toast.error(`"${file.name}" rejected: ${errMsg.replace(/^(Error:\s*)+/i, "")}`);
+        } else {
+          failCount++;
+        }
       }
     }
 
@@ -902,9 +1041,11 @@ function Dashboard() {
       // Clean and construct description from note or voice transcription
       const cleanDesc = cleanDescription(parsed.description || rawText, String(parsed.amount));
       const { expenseCategory } = parseExpenseCategoryAndDescription(cleanDesc || rawText || parsed.description);
+      // Build a meaningful description — never fall back to meaningless image/PDF filenames
       const finalRawText = cleanDesc 
         ? `${expenseCategory} · ${cleanDesc}` 
-        : (parsed.description || rawText || expenseCategory);
+        : (parsed.description || rawText || 
+           (parsed.vendor ? `${expenseCategory} · ${parsed.vendor}` : expenseCategory));
 
       // Use the invoice date from the parsed bill if available; otherwise use the user-selected date
       const effectiveDateStr = parsed.date ?? format(billDate, "yyyy-MM-dd");
@@ -925,24 +1066,85 @@ function Dashboard() {
       if (parsed.line_items && parsed.line_items.length > 0) {
         for (const item of parsed.line_items) {
           const itemExpCat = (item.description || "").toLowerCase().includes("raw material") ? "Raw material" : expenseCategory;
-          const { data: inserted, error } = await supabase
-            .from("expenses")
-            .insert({
-              amount: item.amount,
-              vendor: item.vendor || parsed.vendor,
-              category: parsed.category,
-              currency: detectedCurrency,
-              raw_text: item.description || parsed.description || `[${attachment?.kind ?? "attachment"}] ${attachment?.name ?? ""}`,
-              user_id: user.id,
-              business_id: linkedBusiness,
-              created_at: new Date().toISOString(),
-              date: effectiveDateStr,
-              main_category: mainCategoryVal,
-              company_entity: entityName,
-              expense_category: itemExpCat,
-            })
-            .select()
-            .single();
+          let inserted: any = null;
+          let error: any = null;
+
+          try {
+            const res = await supabase
+              .from("expenses")
+              .insert({
+                amount: item.amount,
+                vendor: item.vendor || parsed.vendor,
+                category: parsed.category,
+                currency: detectedCurrency,
+                raw_text: item.description || parsed.description || (parsed.vendor ? `${expenseCategory} · ${item.vendor || parsed.vendor}` : expenseCategory),
+                user_id: user.id,
+                business_id: linkedBusiness,
+                created_at: new Date().toISOString(),
+                date: effectiveDateStr,
+                main_category: mainCategoryVal,
+                company_entity: entityName,
+                expense_category: itemExpCat,
+              })
+              .select()
+              .single();
+            inserted = res.data;
+            error = res.error;
+          } catch (e: any) {
+            error = e;
+          }
+
+          if (error && (error.code === "42703" || (error.message && error.message.includes("column")))) {
+            console.warn("[Dashboard] Text insert Tier 1 failed (column undefined). Retrying Tier 2 (without main_category)...");
+            try {
+              const res = await supabase
+                .from("expenses")
+                .insert({
+                  amount: item.amount,
+                  vendor: item.vendor || parsed.vendor,
+                  category: parsed.category,
+                  currency: detectedCurrency,
+                  raw_text: item.description || parsed.description || (parsed.vendor ? `${expenseCategory} · ${item.vendor || parsed.vendor}` : expenseCategory),
+                  user_id: user.id,
+                  business_id: linkedBusiness,
+                  created_at: new Date().toISOString(),
+                  date: effectiveDateStr,
+                  company_entity: entityName,
+                  expense_category: itemExpCat,
+                })
+                .select()
+                .single();
+              inserted = res.data;
+              error = res.error;
+            } catch (e: any) {
+              error = e;
+            }
+          }
+
+          if (error && (error.code === "42703" || (error.message && error.message.includes("column")))) {
+            console.warn("[Dashboard] Text insert Tier 2 failed (column undefined). Retrying Tier 3 (legacy)...");
+            try {
+              const res = await supabase
+                .from("expenses")
+                .insert({
+                  amount: item.amount,
+                  vendor: item.vendor || parsed.vendor,
+                  category: parsed.category,
+                  currency: detectedCurrency,
+                  raw_text: item.description || parsed.description || (parsed.vendor ? `${expenseCategory} · ${item.vendor || parsed.vendor}` : expenseCategory),
+                  user_id: user.id,
+                  business_id: linkedBusiness,
+                  created_at: new Date().toISOString(),
+                })
+                .select()
+                .single();
+              inserted = res.data;
+              error = res.error;
+            } catch (e: any) {
+              error = e;
+            }
+          }
+
           if (error) throw error;
 
           const rate = getRateToINR(detectedCurrency, effectiveDate);
@@ -966,25 +1168,88 @@ function Dashboard() {
       }
 
       // ── Standard single-item insert ──────────────────────────────────
-      const { data: inserted, error } = await supabase
-        .from("expenses")
-        .insert({
-          amount: parsed.amount,
-          vendor: parsed.vendor,
-          category: parsed.category,
-          currency: detectedCurrency,
-          raw_text:
-            finalRawText || `[${attachment?.kind ?? "attachment"}] ${attachment?.name ?? ""}`,
-          user_id: user.id,
-          business_id: linkedBusiness,
-          created_at: new Date().toISOString(),
-          date: effectiveDateStr,
-          main_category: mainCategoryVal,
-          company_entity: entityName,
-          expense_category: expenseCategory,
-        })
-        .select()
-        .single();
+      let inserted: any = null;
+      let error: any = null;
+
+      try {
+        const res = await supabase
+          .from("expenses")
+          .insert({
+            amount: parsed.amount,
+            vendor: parsed.vendor,
+            category: parsed.category,
+            currency: detectedCurrency,
+            raw_text:
+              finalRawText || (parsed.vendor ? `${expenseCategory} · ${parsed.vendor}` : expenseCategory),
+            user_id: user.id,
+            business_id: linkedBusiness,
+            created_at: new Date().toISOString(),
+            date: effectiveDateStr,
+            main_category: mainCategoryVal,
+            company_entity: entityName,
+            expense_category: expenseCategory,
+          })
+          .select()
+          .single();
+        inserted = res.data;
+        error = res.error;
+      } catch (e: any) {
+        error = e;
+      }
+
+      if (error && (error.code === "42703" || (error.message && error.message.includes("column")))) {
+        console.warn("[Dashboard] Text insert Tier 1 failed (column undefined). Retrying Tier 2 (without main_category)...");
+        try {
+          const res = await supabase
+            .from("expenses")
+            .insert({
+              amount: parsed.amount,
+              vendor: parsed.vendor,
+              category: parsed.category,
+              currency: detectedCurrency,
+              raw_text:
+                finalRawText || (parsed.vendor ? `${expenseCategory} · ${parsed.vendor}` : expenseCategory),
+              user_id: user.id,
+              business_id: linkedBusiness,
+              created_at: new Date().toISOString(),
+              date: effectiveDateStr,
+              company_entity: entityName,
+              expense_category: expenseCategory,
+            })
+            .select()
+            .single();
+          inserted = res.data;
+          error = res.error;
+        } catch (e: any) {
+          error = e;
+        }
+      }
+
+      if (error && (error.code === "42703" || (error.message && error.message.includes("column")))) {
+        console.warn("[Dashboard] Text insert Tier 2 failed (column undefined). Retrying Tier 3 (legacy)...");
+        try {
+          const res = await supabase
+            .from("expenses")
+            .insert({
+              amount: parsed.amount,
+              vendor: parsed.vendor,
+              category: parsed.category,
+              currency: detectedCurrency,
+              raw_text:
+                finalRawText || (parsed.vendor ? `${expenseCategory} · ${parsed.vendor}` : expenseCategory),
+              user_id: user.id,
+              business_id: linkedBusiness,
+              created_at: new Date().toISOString(),
+            })
+            .select()
+            .single();
+          inserted = res.data;
+          error = res.error;
+        } catch (e: any) {
+          error = e;
+        }
+      }
+
       if (error) throw error;
 
       // Audit record with historical FX rate
@@ -1030,7 +1295,7 @@ function Dashboard() {
             <div>
               <h1 className="text-xl font-semibold tracking-tight text-foreground">Dashboard</h1>
               <p className="text-sm text-muted-foreground">
-                Welcome back. Here&apos;s your financial overview.
+                Welcome back. Here is your unified corporate ledger, real-time outflow velocity, and financial intelligence overview.
               </p>
             </div>
             <div className="flex items-center gap-4">
@@ -1553,7 +1818,7 @@ function Dashboard() {
                         Number(e.amount) || 0,
                         e.currency || "INR",
                         displayCurrency,
-                        e.created_at,
+                        e.date || e.created_at,
                       );
 
                       const cleanVendor = cleanVendorName(e.vendor);
@@ -1808,6 +2073,13 @@ function ExpenseCopilot({ expenses }: { expenses: Expense[] }) {
         }
       }
 
+      // 1.5 Detect Year
+      let targetYear: number | null = null;
+      const yearMatch = query.match(/\b(202\d)\b/);
+      if (yearMatch) {
+        targetYear = parseInt(yearMatch[1], 10);
+      }
+
       // 2. Detect Category
       let targetCategory: string | null = null;
       const commonCategories = ["travel", "website", "repair", "maintenance", "telecom", "marketing", "advertising", "material", "food", "office", "personal", "business"];
@@ -1834,6 +2106,15 @@ function ExpenseCopilot({ expenses }: { expenses: Expense[] }) {
         if (vend.length > 2 && lower.includes(vend)) {
           targetVendor = vend;
           break;
+        }
+      }
+
+      // Avoid conflict if the matched vendor name is identical to or contains the category name (e.g. "travel" matching category and a vendor containing "travel")
+      if (targetVendor && targetCategory) {
+        const v = targetVendor.toLowerCase();
+        const c = targetCategory.toLowerCase();
+        if (v === c || v.includes(c) || c.includes(v)) {
+          targetVendor = null;
         }
       }
 
@@ -1891,10 +2172,8 @@ function ExpenseCopilot({ expenses }: { expenses: Expense[] }) {
       } else if (lower.includes("average") || lower.includes("avg") || lower.includes("mean")) {
         const avg = totalCount > 0 ? totalAmount / totalCount : 0;
         reply = `📊 **Average Transaction Size:**\n\nAcross all **${totalCount} entries** in your ledger, the average transaction size is **₹${avg.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}**.`;
-      } else if (lower.includes("total spend") || lower.includes("how much spent") || lower.includes("net outflow") || lower.includes("total expenses") || lower.includes("entire spend") || lower.includes("net spent") || lower.includes("outflow sum")) {
-        reply = `💵 **Aggregated Ledger Outflow:**\n\nYour total net outflow across all recorded transactions is **₹${totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}** across **${totalCount} entries**.`;
       } else if (
-        (targetMonthNum !== null || targetCategory !== null || targetVendor !== null || targetEntity !== null) &&
+        (targetMonthNum !== null || targetYear !== null || targetCategory !== null || targetVendor !== null || targetEntity !== null) &&
         !lower.includes("budget") && !lower.includes("limit") && !lower.includes("actual")
       ) {
         // Run Dynamic Filter Query
@@ -1904,9 +2183,18 @@ function ExpenseCopilot({ expenses }: { expenses: Expense[] }) {
         if (targetMonthNum !== null) {
           filtered = filtered.filter((e) => {
             const d = e.date ? new Date(e.date) : new Date(e.created_at);
-            return !isNaN(d.getTime()) && d.getMonth() === targetMonthNum;
+            if (isNaN(d.getTime())) return false;
+            const matchesMonth = d.getMonth() === targetMonthNum;
+            const matchesYear = targetYear !== null ? d.getFullYear() === targetYear : true;
+            return matchesMonth && matchesYear;
           });
-          filterDesc.push(`in **${targetMonthName}**`);
+          filterDesc.push(`in **${targetMonthName}${targetYear !== null ? ` ${targetYear}` : ""}**`);
+        } else if (targetYear !== null) {
+          filtered = filtered.filter((e) => {
+            const d = e.date ? new Date(e.date) : new Date(e.created_at);
+            return !isNaN(d.getTime()) && d.getFullYear() === targetYear;
+          });
+          filterDesc.push(`in **${targetYear}**`);
         }
 
         if (targetCategory !== null) {
@@ -1961,6 +2249,8 @@ function ExpenseCopilot({ expenses }: { expenses: Expense[] }) {
             reply += `• **${cleanVendorName(e.vendor || "Expense")}**: ₹${Number(e.amount).toLocaleString("en-IN")} on *${displayDate}* (${normalizeCategory(e.expense_category || e.category || "Other")})\n`;
           });
         }
+      } else if (lower.includes("total spend") || lower.includes("how much spent") || lower.includes("net outflow") || lower.includes("total expenses") || lower.includes("entire spend") || lower.includes("net spent") || lower.includes("outflow sum")) {
+        reply = `💵 **Aggregated Ledger Outflow:**\n\nYour total net outflow across all recorded transactions is **₹${totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}** across **${totalCount} entries**.`;
       } else if (lower.includes("budget") || lower.includes("limit") || lower.includes("actual")) {
         // Calculate category spent dynamically from active expenses
         const catSpent: Record<string, number> = {};

@@ -57,7 +57,7 @@ interface Expense {
 
 function DirectCostPage() {
   const { user } = useAuth();
-  const { currency: displayCurrency } = useCurrency();
+  const { currency: displayCurrency, ratesVersion } = useCurrency();
   const navigate = useNavigate();
   
   // All expenses fetched from DB
@@ -73,7 +73,9 @@ function DirectCostPage() {
   const [customToDate, setCustomToDate] = useState<string>("");
 
   const loadExpenses = async () => {
-    setLoading(true);
+    if (allItems.length === 0) {
+      setLoading(true);
+    }
     const { data } = await supabase
       .from("expenses")
       .select("*")
@@ -168,7 +170,7 @@ function DirectCostPage() {
         }
         return true; // All
       });
-  }, [allItems, selectedPeriod, customFromDate, customToDate]);
+  }, [allItems, selectedPeriod, customFromDate, customToDate, ratesVersion]);
 
   // 1. Entity level filters + Totality calculations
   const filteredRecords = useMemo(() => {

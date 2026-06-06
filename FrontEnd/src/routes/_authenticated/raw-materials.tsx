@@ -23,7 +23,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useCurrency } from "@/hooks/use-currency";
 import { formatCurrency } from "@/lib/currency";
 import { getRateToINR } from "@/lib/fx";
-import { cleanVendorName, parseDescriptionDetails, resolveEntityFromVendor } from "@/lib/utils";
+import { cleanVendorName, parseDescriptionDetails, resolveEntityFromVendor, normalizeCategory } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -134,7 +134,7 @@ function parseRawMaterialDesc(rawText: string | null) {
 
 function RawMaterialsPage() {
   const { user } = useAuth();
-  const { currency: displayCurrency } = useCurrency();
+  const { currency: displayCurrency, ratesVersion } = useCurrency();
   const navigate = useNavigate();
   const [allItems, setAllItems] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -144,16 +144,19 @@ function RawMaterialsPage() {
   const [selectedGroup, setSelectedGroup] = useState<string>("all");
 
   const loadRawMaterials = async () => {
-    setLoading(true);
+    if (allItems.length === 0) {
+      setLoading(true);
+    }
     const { data } = await supabase
       .from("expenses")
       .select("*")
       .order("date", { ascending: false });
     
     // Filter specifically for Raw material expenses
-    const rawMaterialExpenses = (data ?? []).filter(
-      (item) => item.expense_category === "Raw material" || item.category === "Raw material" || (item.raw_text && item.raw_text.toLowerCase().includes("raw material"))
-    );
+    const rawMaterialExpenses = (data ?? []).filter((item) => {
+      const normalizedCat = normalizeCategory(item.expense_category || item.category || "");
+      return normalizedCat === "Raw Material" || (item.raw_text && item.raw_text.toLowerCase().includes("raw material"));
+    });
     
     setAllItems(rawMaterialExpenses as Expense[]);
     setLoading(false);
@@ -209,7 +212,7 @@ function RawMaterialsPage() {
         invoiceDate
       };
     });
-  }, [allItems]);
+  }, [allItems, ratesVersion]);
 
   // Distinct material natures list for filter dropdown
   const distinctNatures = useMemo(() => {

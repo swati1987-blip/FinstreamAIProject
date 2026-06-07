@@ -162,6 +162,7 @@ GEMINI_API_KEY="your-gemini-api-key"
 
 # n8n Automation Webhook
 CAPTURE_WEBHOOK_URL="http://localhost:5678/webhook/capture-expense"
+```
 
 ## 📸 Screenshots
 

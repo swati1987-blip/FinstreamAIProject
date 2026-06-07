@@ -35,7 +35,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyAmDBgy6eLnLiqRNMd_jtzdgxh18FlK7hE",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=YOUR-GEMINI-API-KEY",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"Extract all readable text from this bill. Return as plain text only, preserve formatting, and extract every line of the receipt including line-item prices.\"\n        },\n        {\n          \"inlineData\": {\n            \"mimeType\": \"image/jpeg\",\n            \"data\": \"{{ $json.body.imageBase64 || $json.imageBase64 }}\"\n          }\n        }\n      ]\n    }\n  ]\n}",

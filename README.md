@@ -145,10 +145,23 @@ npm run dev
 4. Open the local Vite URL shown in the terminal.
 
 ## 🔑 Environment Variables
+Create a `.env` file in the root of the frontend directory (`FrontEnd/.env`) and add the following keys with your own credentials:
 
-Create a `FrontEnd/.env` file with the required Supabase and AI keys, and do not store secrets in `README.md`. Keep server-side credentials secure and out of source control.
+```env
+# Supabase Database Keys
+SUPABASE_URL="https://your-project-id.supabase.co"
+SUPABASE_PUBLISHABLE_KEY="your-supabase-anonymous-key"
+VITE_SUPABASE_URL="https://your-project-id.supabase.co"
+VITE_SUPABASE_PUBLISHABLE_KEY="your-supabase-anonymous-key"
+VITE_SUPABASE_PROJECT_ID="your-project-id"
 
-> For client-side values, only use `VITE_` variables that are safe to expose. Keep `SUPABASE_SERVICE_ROLE_KEY` and other secret keys in a server-only environment.
+# AI Service Keys (Gemini & Lovable)
+LOVABLE_API_KEY="your-lovable-api-key"
+GOOGLE_API_KEY="your-gemini-api-key"
+GEMINI_API_KEY="your-gemini-api-key"
+
+# n8n Automation Webhook
+CAPTURE_WEBHOOK_URL="http://localhost:5678/webhook/capture-expense"
 
 ## 📸 Screenshots
 
@@ -165,6 +178,7 @@ Create a `FrontEnd/.env` file with the required Supabase and AI keys, and do not
 
 ## 🌐 Deployment Links
 
+- **Project public URL:** https://tanstack-start-app.finstreamai.workers.dev/
 - **Google Sheets sync demo:** https://docs.google.com/spreadsheets/d/1bHIPSsCFYGYcTG-AGqiuLIlZObOKh_Myn86o0bghvNk/edit?gid=0#gid=0
 
 ## 🚀 Future Roadmap

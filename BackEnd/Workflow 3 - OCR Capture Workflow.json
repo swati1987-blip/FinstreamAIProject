@@ -1,0 +1,115 @@
+{
+  "name": "OCR Capture Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        208,
+        80
+      ],
+      "id": "0da31dca-8b6d-4a35-b84f-4494ed5826ce",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "capture-expense",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        80
+      ],
+      "id": "8fca048b-33c6-47f8-b1b1-8ee5946eeeaf",
+      "name": "Webhook Trigger1",
+      "webhookId": "22f62a6d-3424-4364-b572-f65d64cbe7d7"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyAmDBgy6eLnLiqRNMd_jtzdgxh18FlK7hE",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"Extract all readable text from this bill. Return as plain text only, preserve formatting, and extract every line of the receipt including line-item prices.\"\n        },\n        {\n          \"inlineData\": {\n            \"mimeType\": \"image/jpeg\",\n            \"data\": \"{{ $json.body.imageBase64 || $json.imageBase64 }}\"\n          }\n        }\n      ]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -240,
+        80
+      ],
+      "id": "37b5cd9d-361d-44dd-a9c3-568428457668",
+      "name": "Call Gemini API1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        -16,
+        80
+      ],
+      "id": "71f206ce-73cd-47e1-8202-14e8cf6754c3",
+      "name": "Set Node1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Call Gemini API1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Gemini API1": {
+      "main": [
+        [
+          {
+            "node": "Set Node1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Node1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "f1c4ddf5-d8e4-49e7-847d-7026f2ca5ec2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9420e9f4e44d034606860e4a253eecc1eed8617647e6329e8337bec227c101cb"
+  },
+  "id": "rNaGnhqKg2LVD9ZQ",
+  "tags": []
+}

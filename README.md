@@ -146,20 +146,9 @@ npm run dev
 
 ## 🔑 Environment Variables
 
-Add the following variables for the frontend and server integration:
+Create a `FrontEnd/.env` file with the required Supabase and AI keys, and do not store secrets in `README.md`. Keep server-side credentials secure and out of source control.
 
-```env
-VITE_SUPABASE_URL="https://your-supabase-project.supabase.co"
-VITE_SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
-VITE_SUPABASE_PROJECT_ID="your-supabase-project-id"
-SUPABASE_URL="https://your-supabase-project.supabase.co"
-SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
-SUPABASE_SERVICE_ROLE_KEY="your-supabase-service-role-key"
-LOVABLE_API_KEY="your-lovable-or-google-api-key"
-GOOGLE_GEMINI_API_KEY="your-google-gemini-api-key"
-```
-
-> Note: For client-side usage, `VITE_` variables are exposed to the browser. Keep all server-side secrets in a secure environment.
+> For client-side values, only use `VITE_` variables that are safe to expose. Keep `SUPABASE_SERVICE_ROLE_KEY` and other secret keys in a server-only environment.
 
 ## 📸 Screenshots
 
@@ -174,18 +163,9 @@ GOOGLE_GEMINI_API_KEY="your-google-gemini-api-key"
 ![Reports page 3](Screenshots/finstreamai-Reports-3.png)
 ![Reports page 4](Screenshots/finstreamai-Reports-4.png)
 
-
-## 🎥 GIF Demos
-
-No demo GIF files are included in this repo currently. Add animated workflow GIFs to the `Screenshots/` folder and update this section when available.
-
 ## 🌐 Deployment Links
 
-
-- **Live demo:** https://finstream-ai.example.com — replace with your production URL.
-- **Public login page:** https://tanstack-start-app.finstreamai.workers.dev/login
-- **Google Sheets sync demo:** (https://docs.google.com/spreadsheets/d/1bHIPSsCFYGYcTG-AGqiuLIlZObOKh_Myn86o0bghvNk/edit?gid=0#gid=0)
-
+- **Google Sheets sync demo:** https://docs.google.com/spreadsheets/d/1bHIPSsCFYGYcTG-AGqiuLIlZObOKh_Myn86o0bghvNk/edit?gid=0#gid=0
 
 ## 🚀 Future Roadmap
 

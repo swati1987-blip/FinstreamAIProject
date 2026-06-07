@@ -164,23 +164,20 @@ GOOGLE_GEMINI_API_KEY="your-google-gemini-api-key"
 ## 📸 Screenshots
 
 ![Login page](Screenshots/finstreamai-login-page.png)
-![Dashboard page 1](Screenshots/finstreamai-dashboard.png)
+![Dashboard page 1](Screenshots/finstreamai-Dashboard.png)
 ![Transaction ledger](Screenshots/finstreamai-TransactionLedger-Page.png)
 ![Direct cost page 1](Screenshots/finstreamai-DirectCost-Page-1.png)
 ![Direct cost page 2](Screenshots/finstream_DirectCost-Page-2.png)
 ![Indirect cost page](Screenshots/finstreamai-Indirectcost-Page.png)
-![Reports page 1](Screenshots/finstreamai-Reports-Page-1.png)
-![Reports page 2](Screenshots/finstreamai-Reports-Page-2.png)
-![Reports page 3](Screenshots/finstreamai-Reports-Page-3.png)
+![Reports page 1](Screenshots/finstreamai-Reports-1.png)
+![Reports page 2](Screenshots/finstreamai-Reports-2.png)
+![Reports page 3](Screenshots/finstreamai-Reports-3.png)
+![Reports page 4](Screenshots/finstreamai-Reports-4.png)
+
 
 ## 🎥 GIF Demos
 
-
-Add animated workflow demos to the repo when available. Replace these placeholders by adding the GIF files to the `Screenshots/` folder; GitHub will render them inline.
-
-- ![Dashboard demo](Screenshots/finstreamai-dashboard-demo.gif)
-- ![Upload workflow](Screenshots/finstreamai-upload-workflow.gif)
-- ![Google Sheets sync](Screenshots/finstreamai-google-sheets-sync.gif)
+No demo GIF files are included in this repo currently. Add animated workflow GIFs to the `Screenshots/` folder and update this section when available.
 
 ## 🌐 Deployment Links
 

@@ -506,8 +506,8 @@ export function resolveEntityFromVendor(vendor: string | null | undefined, rawTe
   if (/\bAAS\b|BHANDARI/i.test(textToCheck)) {
     return "AAS";
   }
-  // TI - Tech Industries (Valor, Mech)
-  if (/\bTI\b|VALOR|MECH/i.test(textToCheck)) {
+  // TI - Tech Industries / Tennex Impex (Valor, Mech, Tennex)
+  if (/\bTI\b|VALOR|MECH|TENNEX/i.test(textToCheck)) {
     return "TI";
   }
   // CPM
@@ -565,6 +565,113 @@ export function normalizeCategory(cat: string | null | undefined): string {
   // Fallback: title case
   return cat.trim().split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
 }
+
+export function matchBuyerToEntity(buyerName: string | null | undefined, businesses: any[]): string {
+  if (!buyerName) return "None";
+  const name = buyerName.trim().toUpperCase();
+  
+  // Explicit matches for known corporate entities
+  if (name.includes("KUMARAM SPORTS") || name.includes("KUMARAM RUBBER") || name.includes("KISMAT SALES") || name === "KS") {
+    const found = businesses.find(b => b.name.toUpperCase() === "KS");
+    if (found) return found.name;
+  }
+  if (name.includes("TECH INDUSTRIES") || name.includes("TENNEX") || name.includes("VALOR") || name === "TI") {
+    const found = businesses.find(b => b.name.toUpperCase() === "TI");
+    if (found) return found.name;
+  }
+  if (name.includes("ALL ABOUT SPORTS") || name.includes("BHANDARI") || name === "AAS") {
+    const found = businesses.find(b => b.name.toUpperCase() === "AAS");
+    if (found) return found.name;
+  }
+  if (name.includes("CPM")) {
+    const found = businesses.find(b => b.name.toUpperCase() === "CPM");
+    if (found) return found.name;
+  }
+  if (name.includes("SWATI")) {
+    const found = businesses.find(b => b.name.toUpperCase() === "SWATI");
+    if (found) return found.name;
+  }
+
+  // Exact match
+  const exactMatch = businesses.find(b => b.name.toUpperCase() === name);
+  if (exactMatch) return exactMatch.name;
+
+  // Substring match: business name inside buyerName, or buyerName inside business name
+  const substringMatch = businesses.find(b => {
+    const bUpper = b.name.toUpperCase();
+    return bUpper.length >= 2 && (name.includes(bUpper) || bUpper.includes(name));
+  });
+  if (substringMatch) return substringMatch.name;
+
+  return "None";
+}
+
+export function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(",")[1] || "";
+      resolve(base64);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+export function resizeImageIfNeeded(file: File): Promise<File> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined" || !file.type.startsWith("image/")) {
+      resolve(file);
+      return;
+    }
+    const img = new Image();
+    img.src = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(img.src);
+      const longEdge = Math.max(img.width, img.height);
+      if (longEdge <= 1500) {
+        resolve(file);
+        return;
+      }
+      
+      let width = img.width;
+      let height = img.height;
+      if (width > height) {
+        height = Math.round((height * 1500) / width);
+        width = 1500;
+      } else {
+        width = Math.round((width * 1500) / height);
+        height = 1500;
+      }
+      
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          resolve(file);
+          return;
+        }
+        const resizedFile = new File([blob], file.name, {
+          type: file.type,
+          lastModified: Date.now(),
+        });
+        resolve(resizedFile);
+      }, file.type);
+    };
+    img.onerror = () => {
+      resolve(file);
+    };
+  });
+}
+
 
 
 
